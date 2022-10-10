@@ -7,6 +7,7 @@
 #include "debug.h"
 #include "event.h"
 #include "eventQueue.h"
+#include <pico/multicore.h>
 
 #define NUM_LINES 5
 #define NUM_COLUMNS 12
@@ -240,6 +241,16 @@ void setup()
     s_switches[line][column] = false;
     s_currentPressCount[line][column] = 0;
   }
+
+  multicore_launch_core1(runSecondCoreLoop);
+}
+
+void runSecondCoreLoop()
+{
+  while (true)
+  {
+    secondCoreLoop();
+  }
 }
 
 #if PERF_LOG
@@ -314,185 +325,191 @@ void loop()
 #endif
     return;
   }
+}
 
+void secondCoreLoop()
+{
   unsigned long current = micros();
   uint8_t eventsBegin = s_events.begin();
   uint8_t eventsEnd = s_events.end();
-  while (eventsBegin != eventsEnd)
+
+  while (eventsBegin == eventsEnd) return;
+
+  const Event& event = s_events[eventsBegin];
+
+  // First do debouncing.
   {
-    const Event& event = s_events[eventsBegin];
+    if (current - event.m_time < DEBOUNCE_TIME) return; // We have to wait a bit and pull the switches to check if we need to debounce.
 
-    // First do debouncing.
     {
-      if (current - event.m_time < DEBOUNCE_TIME) break; // We have to wait a bit and pull the switches to check if we need to debounce.
-
-      {
-        bool debounced = false;
-        for (uint8_t it = s_events.next(eventsBegin, eventsEnd); it != eventsEnd; it = s_events.next(it, eventsEnd))
-        {
-          if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME)
-          {
-            break;
-          }
-
-          if (s_events[it].m_pos == event.m_pos && s_events[it].m_isPressed != event.m_isPressed)
-          {
-            debugPrint("Cancel key\n");
-            s_events.popFront(eventsEnd);
-            eventsBegin = s_events.begin();
-            s_events.remove(it);
-            debounced = true;
-            break;
-          }
-        }
-
-#if DEBUG_LOG
-        if (debounced)
-        {
-          debugPrintln("Debounced a key, event queue:");
-          s_events.print(eventsBegin, eventsEnd, "\t");
-        }
-#endif
-
-        if (debounced) break; // We debounced the current event, go to next.
-      }
-    }
-    if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed)
-    {
-      bool foundRelease = false;
-      bool foundAnotherPress = false;
-      uint8_t releaseIndex;
+      bool debounced = false;
       for (uint8_t it = s_events.next(eventsBegin, eventsEnd); it != eventsEnd; it = s_events.next(it, eventsEnd))
       {
-        if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed)
+        if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME)
         {
-          foundRelease = true;
-          releaseIndex = it;
           break;
         }
 
-        if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed)
+        if (s_events[it].m_pos == event.m_pos && s_events[it].m_isPressed != event.m_isPressed)
         {
-          foundAnotherPress = true;
+          debugPrint("Cancel key\n");
+          s_events.popFront(eventsEnd);
+          eventsBegin = s_events.begin();
+          s_events.remove(it);
+          debounced = true;
           break;
         }
       }
 
-      if (!foundAnotherPress)
+#if DEBUG_LOG
+      if (debounced)
       {
-        if (foundRelease)
-        {
-          if (s_events[releaseIndex].m_time - event.m_time < ENTER_TIME)
-          {
-            debugPrintln("Press and release key");
-            s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
+        debugPrintln("Debounced a key, event queue:");
+        s_events.print(eventsBegin, eventsEnd, "\t");
+      }
+#endif
 
-            {
-              KeyboardOutput output;
-              fillCurrentKeyPress(output);
-              output.send();
+      if (debounced) return; // We debounced the current event, go to next.
+    }
+  }
 
-              debugPrint("\tSending event: ");
-              ON_DEBUG(output.print());
-              debugPrintln();
-            }
+  
+  if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed)
+  {
+    bool foundRelease = false;
+    bool foundAnotherPress = false;
+    uint8_t releaseIndex;
+    for (uint8_t it = s_events.next(eventsBegin, eventsEnd); it != eventsEnd; it = s_events.next(it, eventsEnd))
+    {
+      if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed)
+      {
+        foundRelease = true;
+        releaseIndex = it;
+        break;
+      }
 
-            s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
-            delay(50); // milliseconds
-
-            {
-              KeyboardOutput output;
-              fillCurrentKeyPress(output);
-              output.send();
-
-              debugPrint("\tSending event: ");
-              ON_DEBUG(output.print());
-              debugPrintln();
-            }
-          }
-          s_events.popFront(eventsEnd);
-          eventsBegin = s_events.begin();
-          s_events.remove(releaseIndex);
-        }
-
+      if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed)
+      {
+        foundAnotherPress = true;
         break;
       }
     }
 
+    if (!foundAnotherPress)
+    {
+      if (foundRelease)
+      {
+        if (s_events[releaseIndex].m_time - event.m_time < ENTER_TIME)
+        {
+          debugPrintln("Press and release key");
+          s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
+
+          {
+            KeyboardOutput output;
+            fillCurrentKeyPress(output);
+            output.send();
+
+            debugPrint("\tSending event: ");
+            ON_DEBUG(output.print());
+            debugPrintln();
+          }
+
+          s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
+          delay(50); // milliseconds
+
+          {
+            KeyboardOutput output;
+            fillCurrentKeyPress(output);
+            output.send();
+
+            debugPrint("\tSending event: ");
+            ON_DEBUG(output.print());
+            debugPrintln();
+          }
+        }
+        s_events.popFront(eventsEnd);
+        eventsBegin = s_events.begin();
+        s_events.remove(releaseIndex);
+      }
+
+      return;
+    }
+  }
+
 #if DEBUG_LOG
-    debugPrint("processing event ");
-    debugPrint(s_events.begin());
-    debugPrint(" ");
-    event.print();
-    debugPrintln();
+  debugPrint("processing event ");
+  debugPrint(s_events.begin());
+  debugPrint(" ");
+  event.print();
+  debugPrintln();
 #endif
 
-    // Update the press count of each button.
-    uint8_t& pressCount = s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column];
-    if (event.m_isPressed)
+  // Update the press count of each button.
+  uint8_t& pressCount = s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column];
+  if (event.m_isPressed)
+  {
+    pressCount++;
+  }
+  else
+  {
+    if (pressCount > 0) pressCount--;
+  }
+
+  // Update forced key.
+  {
+    K (*currentLayer)[12] = s_keyMaps[s_layerTracker.mask()];
+    Key forced = currentLayer[event.m_pos.m_line][event.m_pos.m_column].m_forcedKey;
+    if (forced != Key::NONE)
     {
-      pressCount++;
+      s_forcedKey = forced;
     }
-    else
-    {
-      if (pressCount > 0) pressCount--;
+  }
+
+  // Update the the layer (if any change).
+  LayerBit layer = s_layerKeys[event.m_pos.m_line][event.m_pos.m_column];
+  if (layer != LAYER_NONE)
+  {
+    s_layerTracker.delta(layer, event.m_isPressed ? +1 : -1);
+
+    // Reset button presses when layer change.
+    for_line_column {
+      if (immuneToReset[line][column]) continue;
+      s_currentPressCount[line][column] = 0;
     }
 
-    // Update forced key.
-    {
-      K (*currentLayer)[12] = s_keyMaps[s_layerTracker.mask()];
-      Key forced = currentLayer[event.m_pos.m_line][event.m_pos.m_column].m_forcedKey;
-      if (forced != Key::NONE)
-      {
-        s_forcedKey = forced;
-      }
-    }
-
-    // Update the the layer (if any change).
-    LayerBit layer = s_layerKeys[event.m_pos.m_line][event.m_pos.m_column];
-    if (layer != LAYER_NONE)
-    {
-      s_layerTracker.delta(layer, event.m_isPressed ? +1 : -1);
-
-      // Reset button presses when layer change.
-      for_line_column {
-        if (immuneToReset[line][column]) continue;
-        s_currentPressCount[line][column] = 0;
-      }
-
-      s_forcedKey = Key::NONE;
-    }
+    s_forcedKey = Key::NONE;
+  }
 
 #ifdef DEBUG_LOG
-    debugPrintln("Current press count:");
-    for (int line = 0; line < NUM_LINES; ++line)
+  debugPrintln("Current press count:");
+  for (int line = 0; line < NUM_LINES; ++line)
+  {
+    debugPrint("\t");
+    for (int column = 0; column < NUM_COLUMNS; ++column)
     {
-      debugPrint("\t");
-      for (int column = 0; column < NUM_COLUMNS; ++column)
-      {
-        if (column == 6) debugPrint(" ");
-        debugPrint( s_currentPressCount[line][column]);
-      }
-      debugPrintln();
+      if (column == 6) debugPrint(" ");
+      debugPrint( s_currentPressCount[line][column]);
     }
+    debugPrintln();
+  }
 #endif
 
-    // Send an event.
-    {
-      debugPrintln("Send event:");
+  // Send an event.
+  {
+    debugPrintln("Send event:");
 
-      KeyboardOutput output;
-      fillCurrentKeyPress(output);
-      output.send();
+    KeyboardOutput output;
+    fillCurrentKeyPress(output);
+    output.send();
 
-      debugPrint("\tSending event: ");
-      ON_DEBUG(output.print());
-      debugPrintln();
-    }
-
-    s_events.popFront(eventsEnd);
-    eventsBegin = s_events.begin();
+    debugPrint("\tSending event: ");
+    ON_DEBUG(output.print());
+    debugPrintln();
   }
+
+  s_events.popFront(eventsEnd);
+  eventsBegin = s_events.begin();
+
 
 #if PERF_LOG
   unsigned long total = micros() - perf_start;
