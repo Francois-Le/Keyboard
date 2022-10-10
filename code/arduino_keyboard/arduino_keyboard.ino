@@ -4,10 +4,9 @@
 #include "PluggableUSBHID.h"
 #include "Keyboard.h"
 #include "KeyConfig.h"
-
-#define DEBUG_LOG 1
-#define I2C_RESET_LOG 1
-#define PERF_LOG 0
+#include "debug.h"
+#include "event.h"
+#include "eventQueue.h"
 
 #define NUM_LINES 5
 #define NUM_COLUMNS 12
@@ -16,153 +15,6 @@
 #define DEBOUNCE_TIME 10000 // micro-seconds
 #define ENTER_TIME 500000 // micro-seconds
 
-#if DEBUG_LOG
-#define debugPrint(x) Serial.print(x)
-#define debugPrintln(x) Serial.println(x)
-#define ON_DEBUG(x) x
-#else
-#define debugPrint(x)
-#define debugPrintln(x)
-#define ON_DEBUG(x)
-#endif
-
-struct Pos
-{
-  int8_t m_line;
-  int8_t m_column;
-};
-
-inline bool operator==(const Pos& a, const Pos& b)
-{
-  return a.m_line == b.m_line && a.m_column == b.m_column;
-}
-
-inline bool operator!=(const Pos& a, const Pos& b)
-{
-  return a.m_line != b.m_line || a.m_column != b.m_column;
-}
-
-struct Event
-{
-  Pos m_pos;
-  bool m_isPressed;
-  unsigned long m_time;
-
-#if DEBUG_LOG
-  void print() const;
-#endif
-};
-
-#if DEBUG_LOG
-void Event::print() const
-{
-  debugPrint("Event(line: ");
-  debugPrint(m_pos.m_line);
-  debugPrint("\tcolumn: ");
-  debugPrint(m_pos.m_column);
-  debugPrint("\tisPressed: ");
-  debugPrint(m_isPressed);
-  debugPrint("\ttime: ");
-  debugPrint(m_time);
-  debugPrint(")");
-}
-#endif
-
-class EventCircularBuffer
-{
-  public:
-    inline Event& emplaceBack()
-    {
-      m_events[m_tail].m_deleted = false;
-      return m_events[m_tail++].m_item;
-    }
-
-    inline void pushBack(const Event& e)
-    {
-      emplaceBack() = e;
-    }
-
-    inline bool isEmpty() const
-    {
-      return m_head == m_tail;
-    }
-
-    inline const Event& peek() const
-    {
-      return m_events[m_head].m_item;
-    }
-
-    inline void popFront()
-    {
-      m_head = next(m_head);
-    }
-
-    inline uint8_t begin() const
-    {
-      return m_head;
-    }
-
-    inline uint8_t next(uint8_t index)
-    {
-      do
-      {
-        index++;
-      } while (index != m_tail && m_events[index].m_deleted);
-      return index;
-    }
-
-    inline uint8_t end() const
-    {
-      return m_tail;
-    }
-
-    inline const Event& operator[](uint8_t index) const
-    {
-      return m_events[index].m_item;
-    }
-
-    inline void remove(uint8_t index)
-    {
-      if (index == m_head)
-      {
-        m_head++;
-      }
-      else
-      {
-        m_events[index].m_deleted = true;
-      }
-    }
-
-#if DEBUG_LOG
-    void print(const char* prefix = "");
-#endif
-
-  private:
-    struct Item {
-      Event m_item;
-      bool m_deleted;
-    };
-
-    Item m_events[256];
-    uint8_t m_head = 0;
-    uint8_t m_tail = 0;
-};
-
-#if DEBUG_LOG
-void EventCircularBuffer::print(const char* prefix)
-{
-  for (uint8_t it = begin(); it != end(); ++it)
-  {
-    const Item& item = m_events[it];
-    debugPrint(prefix);
-    debugPrint(it);
-    debugPrint(" ");
-    if (item.m_deleted) debugPrint("DELETED");
-    item.m_item.print();
-    debugPrintln();
-  }
-}
-#endif
 
 class LayerTracker
 {
@@ -440,8 +292,11 @@ void loop()
 #if DEBUG_LOG
   if (anyNewEvent)
   {
+    uint8_t eventsBegin = s_events.begin();
+    uint8_t eventsEnd = s_events.end();
+
     debugPrintln("new events added to queue:");
-    s_events.print("\t");
+    s_events.print(eventsBegin, eventsEnd, "\t");
   }
 #endif
 
@@ -461,9 +316,11 @@ void loop()
   }
 
   unsigned long current = micros();
-  while (!s_events.isEmpty())
+  uint8_t eventsBegin = s_events.begin();
+  uint8_t eventsEnd = s_events.end();
+  while (eventsBegin != eventsEnd)
   {
-    const Event& event = s_events.peek();
+    const Event& event = s_events[eventsBegin];
 
     // First do debouncing.
     {
@@ -471,7 +328,7 @@ void loop()
 
       {
         bool debounced = false;
-        for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it))
+        for (uint8_t it = s_events.next(eventsBegin, eventsEnd); it != eventsEnd; it = s_events.next(it, eventsEnd))
         {
           if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME)
           {
@@ -481,7 +338,8 @@ void loop()
           if (s_events[it].m_pos == event.m_pos && s_events[it].m_isPressed != event.m_isPressed)
           {
             debugPrint("Cancel key\n");
-            s_events.popFront();
+            s_events.popFront(eventsEnd);
+            eventsBegin = s_events.begin();
             s_events.remove(it);
             debounced = true;
             break;
@@ -492,11 +350,11 @@ void loop()
         if (debounced)
         {
           debugPrintln("Debounced a key, event queue:");
-          s_events.print("\t");
+          s_events.print(eventsBegin, eventsEnd, "\t");
         }
 #endif
 
-        if (debounced) continue; // We debounced the current event, go to next.
+        if (debounced) break; // We debounced the current event, go to next.
       }
     }
     if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed)
@@ -504,7 +362,7 @@ void loop()
       bool foundRelease = false;
       bool foundAnotherPress = false;
       uint8_t releaseIndex;
-      for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it))
+      for (uint8_t it = s_events.next(eventsBegin, eventsEnd); it != eventsEnd; it = s_events.next(it, eventsEnd))
       {
         if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed)
         {
@@ -552,7 +410,8 @@ void loop()
               debugPrintln();
             }
           }
-          s_events.popFront();
+          s_events.popFront(eventsEnd);
+          eventsBegin = s_events.begin();
           s_events.remove(releaseIndex);
         }
 
@@ -631,7 +490,8 @@ void loop()
       debugPrintln();
     }
 
-    s_events.popFront();
+    s_events.popFront(eventsEnd);
+    eventsBegin = s_events.begin();
   }
 
 #if PERF_LOG
