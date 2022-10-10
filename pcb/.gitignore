@@ -4,6 +4,7 @@
 # Temporary files
 *.000
 *.bak
+*-backups
 *.bck
 *.kicad_pcb-bak
 *.sch-bak
