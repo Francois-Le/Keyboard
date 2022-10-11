@@ -231,7 +231,7 @@ void resetI2C()
 
 void setup()
 {
-#if DEBUG_LOG
+#if DEBUG_LOG || PERF_LOG_CORE_0 || PERF_LOG_CORE_1
   Serial.begin(9600);
 #endif
 
@@ -253,18 +253,14 @@ void runSecondCoreLoop()
   }
 }
 
-#if PERF_LOG
-unsigned long perf_min = -1;
-unsigned long perf_max = 0;
-unsigned long perf_total = 0;
-int perf_count = 0;
-static const int perf_countTotal = 1000;
+#if PERF_LOG_CORE_0 || PERF_LOG_CORE_1
+PerformanceMonitor s_perfMonitor;
 #endif
 
 void loop()
 {
-#if PERF_LOG
-  unsigned long perf_start = micros();
+#if PERF_LOG_CORE_0
+  s_perfMonitor.start();
 #endif
 
   ON_DEBUG(bool anyNewEvent = false);
@@ -323,23 +319,29 @@ void loop()
 #ifdef I2C_RESET_LOG
     Serial.println("Reset i2c");
 #endif
-    return;
   }
+
+#if PERF_LOG_CORE_0
+  s_perfMonitor.end("core 0");
+#endif
 }
 
 void secondCoreLoop()
 {
-  unsigned long current = micros();
-  uint8_t eventsBegin = s_events.begin();
-  uint8_t eventsEnd = s_events.end();
+#if PERF_LOG_CORE_1
+  s_perfMonitor.start();
+#endif
 
-  while (eventsBegin == eventsEnd) return;
-
+  const unsigned long current = micros();
+  const uint8_t eventsBegin = s_events.begin();
+  const uint8_t eventsEnd = s_events.end();
   const Event& event = s_events[eventsBegin];
+
+  if (eventsBegin == eventsEnd) goto endSecondCoreLoop;
 
   // First do debouncing.
   {
-    if (current - event.m_time < DEBOUNCE_TIME) return; // We have to wait a bit and pull the switches to check if we need to debounce.
+    if (current - event.m_time < DEBOUNCE_TIME) goto endSecondCoreLoop; // We have to wait a bit and pull the switches to check if we need to debounce.
 
     {
       bool debounced = false;
@@ -354,7 +356,6 @@ void secondCoreLoop()
         {
           debugPrint("Cancel key\n");
           s_events.popFront(eventsEnd);
-          eventsBegin = s_events.begin();
           s_events.remove(it);
           debounced = true;
           break;
@@ -369,11 +370,11 @@ void secondCoreLoop()
       }
 #endif
 
-      if (debounced) return; // We debounced the current event, go to next.
+      if (debounced) goto endSecondCoreLoop; // We debounced the current event, go to next.
     }
   }
 
-  
+
   if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed)
   {
     bool foundRelease = false;
@@ -428,11 +429,10 @@ void secondCoreLoop()
           }
         }
         s_events.popFront(eventsEnd);
-        eventsBegin = s_events.begin();
         s_events.remove(releaseIndex);
       }
 
-      return;
+      goto endSecondCoreLoop;
     }
   }
 
@@ -445,14 +445,16 @@ void secondCoreLoop()
 #endif
 
   // Update the press count of each button.
-  uint8_t& pressCount = s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column];
-  if (event.m_isPressed)
   {
-    pressCount++;
-  }
-  else
-  {
-    if (pressCount > 0) pressCount--;
+    uint8_t& pressCount = s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column];
+    if (event.m_isPressed)
+    {
+      pressCount++;
+    }
+    else
+    {
+      if (pressCount > 0) pressCount--;
+    }
   }
 
   // Update forced key.
@@ -466,18 +468,20 @@ void secondCoreLoop()
   }
 
   // Update the the layer (if any change).
-  LayerBit layer = s_layerKeys[event.m_pos.m_line][event.m_pos.m_column];
-  if (layer != LAYER_NONE)
   {
-    s_layerTracker.delta(layer, event.m_isPressed ? +1 : -1);
+    LayerBit layer = s_layerKeys[event.m_pos.m_line][event.m_pos.m_column];
+    if (layer != LAYER_NONE)
+    {
+      s_layerTracker.delta(layer, event.m_isPressed ? +1 : -1);
 
-    // Reset button presses when layer change.
-    for_line_column {
-      if (immuneToReset[line][column]) continue;
-      s_currentPressCount[line][column] = 0;
+      // Reset button presses when layer change.
+      for_line_column {
+        if (immuneToReset[line][column]) continue;
+        s_currentPressCount[line][column] = 0;
+      }
+
+      s_forcedKey = Key::NONE;
     }
-
-    s_forcedKey = Key::NONE;
   }
 
 #ifdef DEBUG_LOG
@@ -508,31 +512,9 @@ void secondCoreLoop()
   }
 
   s_events.popFront(eventsEnd);
-  eventsBegin = s_events.begin();
 
-
-#if PERF_LOG
-  unsigned long total = micros() - perf_start;
-
-  perf_min = min(perf_min, total);
-  perf_max = max(perf_max, total);
-  perf_total += total;
-  perf_count++;
-  if (perf_count == perf_countTotal)
-  {
-    unsigned long avg = perf_total / perf_countTotal;
-    Serial.print("pulling perf min=");
-    Serial.print(perf_min);
-    Serial.print("us max=");
-    Serial.print(perf_max);
-    Serial.print("us avg=");
-    Serial.print(avg);
-    Serial.println("us");
-
-    perf_min = -1;
-    perf_max = 0;
-    perf_total = 0;
-    perf_count = 0;
-  }
+endSecondCoreLoop:;
+#if PERF_LOG_CORE_1
+  s_perfMonitor.end();
 #endif
 }
