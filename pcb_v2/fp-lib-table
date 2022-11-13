@@ -1,0 +1,4 @@
+(fp_lib_table
+  (lib (name "kailh")(type "KiCad")(uri "C:/Users/lol_f/Documents/GitHub/Keyboard/library/kikad/keyswitches.pretty-master")(options "")(descr ""))
+  (lib (name "PJ-320A")(type "KiCad")(uri "C:/Users/lol_f/Documents/GitHub/Keyboard/library/kikad/PJ-320A")(options "")(descr ""))
+)
