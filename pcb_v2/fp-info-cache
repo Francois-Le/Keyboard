@@ -1,4 +1,4 @@
-20836351750020647
+20838020336119567
 Audio_Module
 Reverb_BTDR-1H
 Digital Reverberation Unit, http://www.belton.co.kr/inc/downfile.php?seq=17&file=pdf (footprint from http://www.uk-electronic.de/PDF/BTDR-1.pdf)
@@ -61244,6 +61244,13 @@ TRRS-PJ-320A
 4
 PJ-320A
 TRRS-PJ-320A-no-Fmask
+
+
+0
+8
+4
+PJ-320A
+TRRS-PJ-320A-no-Fmask-reversible
 
 
 0
