@@ -26,7 +26,7 @@ K baseLayer[5][12] =
   {K(), K(Key::A), K(Key::Z),   K(Key::E),    K(Key::R),     K(Key::T),     /**/ K(Key::Y),         K(Key::U),   K(Key::I),               K(Key::O),    K(Key::P),  K()},
   {K(), K(Key::Q), K(Key::S),   K(Key::D),    K(Key::F),     K(Key::G),     /**/ K(Key::H),         K(Key::J),   K(Key::K),               K(Key::L),    K(Key::M),  K()},
   {K(), K(Key::W), K(Key::X),   K(Key::C),    K(Key::V),     K(Key::B),     /**/ K(Key::BACKSPACE), K(Key::N),   K(Key::SHIFT, Key::N2 ), K(Key::N1),   K(Key::N2), K()},
-  {K(), K(),       K(),         K(Key::CTRL), K(Key::SHIFT), K(Key::SPACE), /**/ K(Key::ENTER),     K(Key::ALT), K(),                     K(),          K(),        K()},
+  {K(), K(),       K(),         K(Key::CTRL), K(Key::SHIFT), K(Key::SPACE), /**/ K(Key::ENTER),     K(Key::ALT), K(Key::WIN),             K(),          K(),        K()},
 };
 
 
@@ -36,7 +36,7 @@ K shiftLayer[5][12] =
   {K(), K(Key::SHIFT, Key::A),   K(Key::SHIFT, Key::Z),   K(Key::SHIFT, Key::E),    K(Key::SHIFT, Key::R),  K(Key::SHIFT, Key::T),     /**/ K(Key::SHIFT, Key::Y),         K(Key::SHIFT, Key::U),   K(Key::SHIFT, Key::I),   K(Key::SHIFT, Key::O),   K(Key::SHIFT, Key::P),  K()},
   {K(), K(Key::SHIFT, Key::Q),   K(Key::SHIFT, Key::S),   K(Key::SHIFT, Key::D),    K(Key::SHIFT, Key::F),  K(Key::SHIFT, Key::G),     /**/ K(Key::SHIFT, Key::H),         K(Key::SHIFT, Key::J),   K(Key::SHIFT, Key::K),   K(Key::SHIFT, Key::L),   K(Key::SHIFT, Key::M),  K()},
   {K(), K(Key::SHIFT, Key::W),   K(Key::SHIFT, Key::X),   K(Key::SHIFT, Key::C),    K(Key::SHIFT, Key::V),  K(Key::SHIFT, Key::B),     /**/ K(Key::SHIFT, Key::BACKSPACE), K(Key::SHIFT, Key::N),   K(Key::N4 ),             K(Key::SHIFT, Key::N1),  K(Key::N3),             K()},
-  {K(), K(),                     K(),                     K(Key::SHIFT, Key::CTRL), K(),                    K(Key::SHIFT, Key::SPACE), /**/ K(Key::SHIFT, Key::ENTER),     K(Key::SHIFT, Key::ALT), K(),                     K(),                     K(),                    K()},
+  {K(), K(),                     K(),                     K(Key::SHIFT, Key::CTRL), K(),                    K(Key::SHIFT, Key::SPACE), /**/ K(Key::SHIFT, Key::ENTER),     K(Key::SHIFT, Key::ALT), K(Key::SHIFT, Key::WIN), K(),                     K(),                    K()},
 };
 
 K functionLayer[5][12] =
@@ -44,8 +44,8 @@ K functionLayer[5][12] =
   {K(), K(),        K(),         K(),          K(),           K(),           /**/ K(),                      K(),                           K(),          K(),            K(),           K()},
   {K(), K(Key::F1), K(Key::F2),  K(Key::F3),   K(Key::F4),    K(Key::ESC),   /**/ K(MediaKey::VOLUME_UP),   K(Key::TAB, Forced(Key::ALT)), K(Key::UP),   K(Key::MENU),   K(Key::HOME),  K()},
   {K(), K(Key::F5), K(Key::F6),  K(Key::F7),   K(Key::F8),    K(Key::TAB),   /**/ K(MediaKey::VOLUME_DOWN), K(Key::LEFT),                  K(Key::DOWN), K(Key::RIGHT),  K(Key::END),   K()},
-  {K(), K(Key::F9), K(Key::F10), K(Key::F11),  K(Key::F12),   K(Key::WIN),   /**/ K(Key::DEL),              K(Key::ENTER),                 K(Key::P_UP), K(Key::P_DOWN), K(Key::PAUSE), K()},
-  {K(), K(),        K(),         K(Key::CTRL), K(Key::SHIFT), K(Key::SPACE), /**/ K(Key::ENTER),            K(Key::ALT),                   K(),          K(),            K(),           K()},
+  {K(), K(Key::F9), K(Key::F10), K(Key::F11),  K(Key::F12),   K(),           /**/ K(Key::DEL),              K(Key::ENTER),                 K(Key::P_UP), K(Key::P_DOWN), K(Key::PAUSE), K()},
+  {K(), K(),        K(),         K(Key::CTRL), K(Key::SHIFT), K(Key::SPACE), /**/ K(Key::ENTER),            K(Key::ALT),                   K(Key::WIN),  K(),            K(),           K()},
 }; 
 
 K accentLayer[5][12] =
