@@ -5,9 +5,11 @@
 #include "Keyboard.h"
 #include "KeyConfig.h"
 
-#define DEBUG_LOG 1
-#define I2C_RESET_LOG 1
+#define DEBUG_LOG 0
+#define I2C_RESET_LOG 0
 #define PERF_LOG 0
+
+#define VERSION 1
 
 #define NUM_LINES 5
 #define NUM_COLUMNS 12
@@ -192,16 +194,27 @@ class LayerTracker
     uint8_t m_mask = 0;
 };
 
-static const Pos s_mcpToPos[4][8] =
+static const Pos s_mcpToPos[8][8] =
 {
+#if VERSION == 1
+  {Pos{0, 6},  Pos{1, 6},  Pos{2, 6},  Pos{3, 6},  Pos{4, 6},  Pos{4, 7},  Pos{3, 7},  Pos{2, 7}},
+  {Pos{0, 7},  Pos{1, 7},  Pos{4, 8},  Pos{3, 8},  Pos{2, 8},  Pos{1, 8},  Pos{0, 8},  Pos{4, 9}},
+  {Pos{3, 9},  Pos{2, 9},  Pos{1, 9},  Pos{4, 10}, Pos{3, 10}, Pos{0, 9},  Pos{2, 10}, Pos{1, 10}},
+  {Pos{4, 11}, Pos{3, 11}, Pos{2, 11}, Pos{0, 10}, Pos{1, 11}, Pos{0, 11}, Pos{ -1, -1}, Pos{ -1, -1}},
   {Pos{0, 0}, Pos{1, 0}, Pos{2, 0}, Pos{3, 0}, Pos{4, 0}, Pos{4, 1}, Pos{3, 1}, Pos{2, 1}},
   {Pos{0, 1}, Pos{1, 1}, Pos{4, 2}, Pos{3, 2}, Pos{2, 2}, Pos{1, 2}, Pos{0, 2}, Pos{4, 3}},
   {Pos{3, 3}, Pos{2, 3}, Pos{1, 3}, Pos{4, 4}, Pos{3, 4}, Pos{0, 3}, Pos{2, 4}, Pos{1, 4}},
-  {Pos{4, 5}, Pos{3, 5}, Pos{2, 5}, Pos{0, 4}, Pos{1, 5}, Pos{0, 5}, Pos{ -1, -1}, Pos{ -1, -1}}
+  {Pos{4, 5}, Pos{3, 5}, Pos{2, 5}, Pos{0, 4}, Pos{1, 5}, Pos{0, 5}, Pos{ -1, -1}, Pos{ -1, -1}},
+#else
+  {Pos{4, 8},  Pos{4, 7},  Pos{4, 6},  Pos{3, 7},  Pos{3, 6},  Pos{2, 6},  Pos{ -1, -1},  Pos{ -1, -1}},
+  {Pos{2, 7},  Pos{3, 8},  Pos{2, 8},  Pos{1, 8},  Pos{1, 7},  Pos{1, 6},  Pos{ -1, -1},  Pos{ -1, -1}},
+  {Pos{3, 9},  Pos{3, 10}, Pos{2, 10}, Pos{1, 10}, Pos{1, 9},  Pos{2, 9},  Pos{ -1, -1},  Pos{ -1, -1}},
+  
+  {Pos{4, 3},  Pos{4, 4},  Pos{4, 5},  Pos{3, 4},  Pos{3, 5},  Pos{2, 5},  Pos{ -1, -1},  Pos{ -1, -1}},
+  {Pos{2, 4},  Pos{3, 3},  Pos{2, 3},  Pos{1, 3},  Pos{1, 4},  Pos{1, 5},  Pos{ -1, -1},  Pos{ -1, -1}},
+  {Pos{3, 2},  Pos{3, 1},  Pos{2, 1},  Pos{1, 1},  Pos{1, 2},  Pos{2, 2},  Pos{ -1, -1},  Pos{ -1, -1}},
+#endif
 };
-
-static const uint8_t s_leftOffsetCol = 0;
-static const uint8_t s_rightOffsetCol = 6;
 
 bool s_switches[NUM_LINES][NUM_COLUMNS];
 uint8_t s_currentPressCount[NUM_LINES][NUM_COLUMNS];
@@ -209,7 +222,6 @@ uint8_t s_currentPressCount[NUM_LINES][NUM_COLUMNS];
 struct Mcp
 {
   MCP23008* m_mcp;
-  bool m_isLeft;
   uint8_t m_offset;
 };
 
@@ -218,22 +230,35 @@ I2C* s_i2c = nullptr;
 MCP23008 mcp0(0);
 MCP23008 mcp1(1);
 MCP23008 mcp2(2);
+#if VERSION == 1
 MCP23008 mcp3(3);
+#endif
 MCP23008 mcp4(4);
 MCP23008 mcp5(5);
 MCP23008 mcp6(6);
+#if VERSION == 1
 MCP23008 mcp7(7);
+#endif
 
 static const Mcp s_mcps[] =
 {
-  Mcp{&mcp0, false, 0},
-  Mcp{&mcp1, false, 1},
-  Mcp{&mcp2, false, 2},
-  Mcp{&mcp3, false, 3},
-  Mcp{&mcp4, true, 0},
-  Mcp{&mcp5, true, 1},
-  Mcp{&mcp6, true, 2},
-  Mcp{&mcp7, true, 3},
+#if VERSION == 1
+  Mcp{&mcp0, 0},
+  Mcp{&mcp1, 1},
+  Mcp{&mcp2, 2},
+  Mcp{&mcp3, 3},
+  Mcp{&mcp4, 4},
+  Mcp{&mcp5, 5},
+  Mcp{&mcp6, 6},
+  Mcp{&mcp7, 7},
+#else
+  Mcp{&mcp0, 0},
+  Mcp{&mcp1, 1},
+  Mcp{&mcp2, 2},
+  Mcp{&mcp4, 3},
+  Mcp{&mcp5, 4},
+  Mcp{&mcp6, 5},
+#endif
 };
 
 Keyboard keyboard;
@@ -406,12 +431,19 @@ void loop()
 
   ON_DEBUG(bool anyNewEvent = false);
   bool mcpError = false;
+#if I2C_RESET_LOG
+  int mcpErrorOffset;
+#endif
+
   for (const Mcp& mcp : s_mcps)
   {
     uint8_t pins = mcp.m_mcp->read_inputs();
     if (mcp.m_mcp->isError())
     {
       mcpError = true;
+#if I2C_RESET_LOG
+      mcpErrorOffset = mcp.m_offset;
+#endif
       break;
     }
 
@@ -420,7 +452,6 @@ void loop()
       Pos pos = s_mcpToPos[mcp.m_offset][pin];
       if (pos.m_line >= 0)
       {
-        pos.m_column += mcp.m_isLeft ? s_leftOffsetCol : s_rightOffsetCol;
         bool isPressed = !(pins & (1 << pin));
         if (s_switches[pos.m_line][pos.m_column] != isPressed)
         {
@@ -454,8 +485,10 @@ void loop()
     }
     resetI2C();
 
-#ifdef I2C_RESET_LOG
-    Serial.println("Reset i2c");
+#if I2C_RESET_LOG
+    Serial.print("Reset i2c (source offset: ");
+    Serial.print(mcpErrorOffset);
+    Serial.println(")");
 #endif
     return;
   }
