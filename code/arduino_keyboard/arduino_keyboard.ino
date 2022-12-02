@@ -9,7 +9,7 @@
 #define I2C_RESET_LOG 0
 #define PERF_LOG 0
 
-#define VERSION 1
+#define VERSION 2
 
 #define NUM_LINES 5
 #define NUM_COLUMNS 12
