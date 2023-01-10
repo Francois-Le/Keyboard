@@ -380,7 +380,7 @@
       "idf": "",
       "netlist": "",
       "specctra_dsn": "",
-      "step": "",
+      "step": "pcb_v2.step",
       "vrml": ""
     },
     "page_layout_descr_file": ""

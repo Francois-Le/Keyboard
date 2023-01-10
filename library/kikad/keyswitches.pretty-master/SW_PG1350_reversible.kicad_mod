@@ -62,4 +62,9 @@
   (pad "1" thru_hole circle (at 0 5.9) (size 2.032 2.032) (drill 1.27) (layers *.Cu *.Mask) (tstamp ecff6837-a08b-483d-9647-9310dfc674e3))
   (pad "2" thru_hole circle (at 5 3.8) (size 2.032 2.032) (drill 1.27) (layers *.Cu *.Mask) (tstamp 480d5422-6d33-4319-a5c2-9ce1cd04fa90))
   (pad "2" thru_hole circle (at -5 3.8) (size 2.032 2.032) (drill 1.27) (layers *.Cu *.Mask) (tstamp 8d3d3e35-82e0-40ba-907a-a8ab9693853e))
+  (model "C:/Users/lol_f/Documents/GitHub/Keyboard/library/kikad/keyswitch-kicad-library/3dmodels/3d-library.3dshapes/SW_Kailh_Choc_V1.wrl"
+    (offset (xyz 0 0 0))
+    (scale (xyz 1 1 1))
+    (rotate (xyz 0 0 180))
+  )
 )
