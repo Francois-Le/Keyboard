@@ -1,0 +1,4 @@
+(fp_lib_table
+  (lib (name "MCU_RaspberryPi_and_Boards")(type "KiCad")(uri "C:/Users/lol_f/Documents/GitHub/Keyboard/library/kikad/RP-Pico Libraries/MCU_RaspberryPi_and_Boards.pretty")(options "")(descr ""))
+  (lib (name "PJ-320A")(type "KiCad")(uri "C:/Users/lol_f/Documents/GitHub/Keyboard/library/kikad/PJ-320A")(options "")(descr ""))
+)
