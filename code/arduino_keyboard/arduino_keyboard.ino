@@ -5,15 +5,9 @@
 #include "Keyboard.h"
 #include "KeyConfig.h"
 
-
 #define DEBUG_LOG 0
 #define I2C_RESET_LOG 0
 #define PERF_LOG 0
-
-#include "debug.h"
-#include "event.h"
-#include "eventQueue.h
-
 
 #define VERSION 2
 
@@ -24,6 +18,153 @@
 #define DEBOUNCE_TIME 10000 // micro-seconds
 #define ENTER_TIME 500000 // micro-seconds
 
+#if DEBUG_LOG
+#define debugPrint(x) Serial.print(x)
+#define debugPrintln(x) Serial.println(x)
+#define ON_DEBUG(x) x
+#else
+#define debugPrint(x)
+#define debugPrintln(x)
+#define ON_DEBUG(x)
+#endif
+
+struct Pos
+{
+  int8_t m_line;
+  int8_t m_column;
+};
+
+inline bool operator==(const Pos& a, const Pos& b)
+{
+  return a.m_line == b.m_line && a.m_column == b.m_column;
+}
+
+inline bool operator!=(const Pos& a, const Pos& b)
+{
+  return a.m_line != b.m_line || a.m_column != b.m_column;
+}
+
+struct Event
+{
+  Pos m_pos;
+  bool m_isPressed;
+  unsigned long m_time;
+
+#if DEBUG_LOG
+  void print() const;
+#endif
+};
+
+#if DEBUG_LOG
+void Event::print() const
+{
+  debugPrint("Event(line: ");
+  debugPrint(m_pos.m_line);
+  debugPrint("\tcolumn: ");
+  debugPrint(m_pos.m_column);
+  debugPrint("\tisPressed: ");
+  debugPrint(m_isPressed);
+  debugPrint("\ttime: ");
+  debugPrint(m_time);
+  debugPrint(")");
+}
+#endif
+
+class EventCircularBuffer
+{
+  public:
+    inline Event& emplaceBack()
+    {
+      m_events[m_tail].m_deleted = false;
+      return m_events[m_tail++].m_item;
+    }
+
+    inline void pushBack(const Event& e)
+    {
+      emplaceBack() = e;
+    }
+
+    inline bool isEmpty() const
+    {
+      return m_head == m_tail;
+    }
+
+    inline const Event& peek() const
+    {
+      return m_events[m_head].m_item;
+    }
+
+    inline void popFront()
+    {
+      m_head = next(m_head);
+    }
+
+    inline uint8_t begin() const
+    {
+      return m_head;
+    }
+
+    inline uint8_t next(uint8_t index)
+    {
+      do
+      {
+        index++;
+      } while (index != m_tail && m_events[index].m_deleted);
+      return index;
+    }
+
+    inline uint8_t end() const
+    {
+      return m_tail;
+    }
+
+    inline const Event& operator[](uint8_t index) const
+    {
+      return m_events[index].m_item;
+    }
+
+    inline void remove(uint8_t index)
+    {
+      if (index == m_head)
+      {
+        m_head++;
+      }
+      else
+      {
+        m_events[index].m_deleted = true;
+      }
+    }
+
+#if DEBUG_LOG
+    void print(const char* prefix = "");
+#endif
+
+  private:
+    struct Item {
+      Event m_item;
+      bool m_deleted;
+    };
+
+    Item m_events[256];
+    uint8_t m_head = 0;
+    uint8_t m_tail = 0;
+};
+
+#if DEBUG_LOG
+void EventCircularBuffer::print(const char* prefix)
+{
+  for (uint8_t it = begin(); it != end(); ++it)
+  {
+    const Item& item = m_events[it];
+    debugPrint(prefix);
+    debugPrint(it);
+    debugPrint(" ");
+    if (item.m_deleted) debugPrint("DELETED");
+    item.m_item.print();
+    debugPrintln();
+  }
+}
+#endif
 
 class LayerTracker
 {
@@ -262,7 +403,7 @@ void resetI2C()
 
 void setup()
 {
-#if DEBUG_LOG || PERF_LOG_CORE_0 || PERF_LOG_CORE_1
+#if DEBUG_LOG
   Serial.begin(9600);
 #endif
 
@@ -272,26 +413,20 @@ void setup()
     s_switches[line][column] = false;
     s_currentPressCount[line][column] = 0;
   }
-
-  multicore_launch_core1(runSecondCoreLoop);
 }
 
-void runSecondCoreLoop()
-{
-  while (true)
-  {
-    secondCoreLoop();
-  }
-}
-
-#if PERF_LOG_CORE_0 || PERF_LOG_CORE_1
-PerformanceMonitor s_perfMonitor;
+#if PERF_LOG
+unsigned long perf_min = -1;
+unsigned long perf_max = 0;
+unsigned long perf_total = 0;
+int perf_count = 0;
+static const int perf_countTotal = 1000;
 #endif
 
 void loop()
 {
-#if PERF_LOG_CORE_0
-  s_perfMonitor.start();
+#if PERF_LOG
+  unsigned long perf_start = micros();
 #endif
 
   ON_DEBUG(bool anyNewEvent = false);
@@ -336,11 +471,8 @@ void loop()
 #if DEBUG_LOG
   if (anyNewEvent)
   {
-    uint8_t eventsBegin = s_events.begin();
-    uint8_t eventsEnd = s_events.end();
-
     debugPrintln("new events added to queue:");
-    s_events.print(eventsBegin, eventsEnd, "\t");
+    s_events.print("\t");
   }
 #endif
 
@@ -358,133 +490,118 @@ void loop()
     Serial.print(mcpErrorOffset);
     Serial.println(")");
 #endif
+    return;
   }
 
-#if PERF_LOG_CORE_0
-  s_perfMonitor.end("core 0");
-#endif
-}
-
-void secondCoreLoop()
-{
-#if PERF_LOG_CORE_1
-  s_perfMonitor.start();
-#endif
-
-  const unsigned long current = micros();
-  const uint8_t eventsBegin = s_events.begin();
-  const uint8_t eventsEnd = s_events.end();
-  const Event& event = s_events[eventsBegin];
-
-  if (eventsBegin == eventsEnd) goto endSecondCoreLoop;
-
-  // First do debouncing.
+  unsigned long current = micros();
+  while (!s_events.isEmpty())
   {
-    if (current - event.m_time < DEBOUNCE_TIME) goto endSecondCoreLoop; // We have to wait a bit and pull the switches to check if we need to debounce.
+    const Event& event = s_events.peek();
 
+    // First do debouncing.
     {
-      bool debounced = false;
-      for (uint8_t it = s_events.next(eventsBegin, eventsEnd); it != eventsEnd; it = s_events.next(it, eventsEnd))
+      if (current - event.m_time < DEBOUNCE_TIME) break; // We have to wait a bit and pull the switches to check if we need to debounce.
+
       {
-        if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME)
+        bool debounced = false;
+        for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it))
         {
+          if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME)
+          {
+            break;
+          }
+
+          if (s_events[it].m_pos == event.m_pos && s_events[it].m_isPressed != event.m_isPressed)
+          {
+            debugPrint("Cancel key\n");
+            s_events.popFront();
+            s_events.remove(it);
+            debounced = true;
+            break;
+          }
+        }
+
+#if DEBUG_LOG
+        if (debounced)
+        {
+          debugPrintln("Debounced a key, event queue:");
+          s_events.print("\t");
+        }
+#endif
+
+        if (debounced) continue; // We debounced the current event, go to next.
+      }
+    }
+    if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed)
+    {
+      bool foundRelease = false;
+      bool foundAnotherPress = false;
+      uint8_t releaseIndex;
+      for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it))
+      {
+        if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed)
+        {
+          foundRelease = true;
+          releaseIndex = it;
           break;
         }
 
-        if (s_events[it].m_pos == event.m_pos && s_events[it].m_isPressed != event.m_isPressed)
+        if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed)
         {
-          debugPrint("Cancel key\n");
-          s_events.popFront(eventsEnd);
-          s_events.remove(it);
-          debounced = true;
+          foundAnotherPress = true;
           break;
         }
       }
 
-#if DEBUG_LOG
-      if (debounced)
+      if (!foundAnotherPress)
       {
-        debugPrintln("Debounced a key, event queue:");
-        s_events.print(eventsBegin, eventsEnd, "\t");
-      }
-#endif
-
-      if (debounced) goto endSecondCoreLoop; // We debounced the current event, go to next.
-    }
-  }
-
-
-  if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed)
-  {
-    bool foundRelease = false;
-    bool foundAnotherPress = false;
-    uint8_t releaseIndex;
-    for (uint8_t it = s_events.next(eventsBegin, eventsEnd); it != eventsEnd; it = s_events.next(it, eventsEnd))
-    {
-      if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed)
-      {
-        foundRelease = true;
-        releaseIndex = it;
-        break;
-      }
-
-      if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed)
-      {
-        foundAnotherPress = true;
-        break;
-      }
-    }
-
-    if (!foundAnotherPress)
-    {
-      if (foundRelease)
-      {
-        if (s_events[releaseIndex].m_time - event.m_time < ENTER_TIME)
+        if (foundRelease)
         {
-          debugPrintln("Press and release key");
-          s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
-
+          if (s_events[releaseIndex].m_time - event.m_time < ENTER_TIME)
           {
-            KeyboardOutput output;
-            fillCurrentKeyPress(output);
-            output.send();
+            debugPrintln("Press and release key");
+            s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
 
-            debugPrint("\tSending event: ");
-            ON_DEBUG(output.print());
-            debugPrintln();
+            {
+              KeyboardOutput output;
+              fillCurrentKeyPress(output);
+              output.send();
+
+              debugPrint("\tSending event: ");
+              ON_DEBUG(output.print());
+              debugPrintln();
+            }
+
+            s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
+            delay(50); // milliseconds
+
+            {
+              KeyboardOutput output;
+              fillCurrentKeyPress(output);
+              output.send();
+
+              debugPrint("\tSending event: ");
+              ON_DEBUG(output.print());
+              debugPrintln();
+            }
           }
-
-          s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
-          delay(50); // milliseconds
-
-          {
-            KeyboardOutput output;
-            fillCurrentKeyPress(output);
-            output.send();
-
-            debugPrint("\tSending event: ");
-            ON_DEBUG(output.print());
-            debugPrintln();
-          }
+          s_events.popFront();
+          s_events.remove(releaseIndex);
         }
-        s_events.popFront(eventsEnd);
-        s_events.remove(releaseIndex);
-      }
 
-      goto endSecondCoreLoop;
+        break;
+      }
     }
-  }
 
 #if DEBUG_LOG
-  debugPrint("processing event ");
-  debugPrint(s_events.begin());
-  debugPrint(" ");
-  event.print();
-  debugPrintln();
+    debugPrint("processing event ");
+    debugPrint(s_events.begin());
+    debugPrint(" ");
+    event.print();
+    debugPrintln();
 #endif
 
-  // Update the press count of each button.
-  {
+    // Update the press count of each button.
     uint8_t& pressCount = s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column];
     if (event.m_isPressed)
     {
@@ -494,20 +611,18 @@ void secondCoreLoop()
     {
       if (pressCount > 0) pressCount--;
     }
-  }
 
-  // Update forced key.
-  {
-    K (*currentLayer)[12] = s_keyMaps[s_layerTracker.mask()];
-    Key forced = currentLayer[event.m_pos.m_line][event.m_pos.m_column].m_forcedKey;
-    if (forced != Key::NONE)
+    // Update forced key.
     {
-      s_forcedKey = forced;
+      K (*currentLayer)[12] = s_keyMaps[s_layerTracker.mask()];
+      Key forced = currentLayer[event.m_pos.m_line][event.m_pos.m_column].m_forcedKey;
+      if (forced != Key::NONE)
+      {
+        s_forcedKey = forced;
+      }
     }
-  }
 
-  // Update the the layer (if any change).
-  {
+    // Update the the layer (if any change).
     LayerBit layer = s_layerKeys[event.m_pos.m_line][event.m_pos.m_column];
     if (layer != LAYER_NONE)
     {
@@ -521,39 +636,59 @@ void secondCoreLoop()
 
       s_forcedKey = Key::NONE;
     }
-  }
 
 #ifdef DEBUG_LOG
-  debugPrintln("Current press count:");
-  for (int line = 0; line < NUM_LINES; ++line)
-  {
-    debugPrint("\t");
-    for (int column = 0; column < NUM_COLUMNS; ++column)
+    debugPrintln("Current press count:");
+    for (int line = 0; line < NUM_LINES; ++line)
     {
-      if (column == 6) debugPrint(" ");
-      debugPrint( s_currentPressCount[line][column]);
+      debugPrint("\t");
+      for (int column = 0; column < NUM_COLUMNS; ++column)
+      {
+        if (column == 6) debugPrint(" ");
+        debugPrint( s_currentPressCount[line][column]);
+      }
+      debugPrintln();
     }
-    debugPrintln();
-  }
 #endif
 
-  // Send an event.
-  {
-    debugPrintln("Send event:");
+    // Send an event.
+    {
+      debugPrintln("Send event:");
 
-    KeyboardOutput output;
-    fillCurrentKeyPress(output);
-    output.send();
+      KeyboardOutput output;
+      fillCurrentKeyPress(output);
+      output.send();
 
-    debugPrint("\tSending event: ");
-    ON_DEBUG(output.print());
-    debugPrintln();
+      debugPrint("\tSending event: ");
+      ON_DEBUG(output.print());
+      debugPrintln();
+    }
+
+    s_events.popFront();
   }
 
-  s_events.popFront(eventsEnd);
+#if PERF_LOG
+  unsigned long total = micros() - perf_start;
 
-endSecondCoreLoop:;
-#if PERF_LOG_CORE_1
-  s_perfMonitor.end();
+  perf_min = min(perf_min, total);
+  perf_max = max(perf_max, total);
+  perf_total += total;
+  perf_count++;
+  if (perf_count == perf_countTotal)
+  {
+    unsigned long avg = perf_total / perf_countTotal;
+    Serial.print("pulling perf min=");
+    Serial.print(perf_min);
+    Serial.print("us max=");
+    Serial.print(perf_max);
+    Serial.print("us avg=");
+    Serial.print(avg);
+    Serial.println("us");
+
+    perf_min = -1;
+    perf_max = 0;
+    perf_total = 0;
+    perf_count = 0;
+  }
 #endif
 }
