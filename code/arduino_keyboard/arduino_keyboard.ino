@@ -1,49 +1,10 @@
-
 #include "mbed.h"
 #include "config.h"
 #include "MCP23008.hpp"
 #include "PluggableUSBHID.h"
 #include "Keyboard.h"
 #include "KeyConfig.h"
-
-
-
-struct Pos {
-  int8_t m_line;
-  int8_t m_column;
-};
-
-inline bool operator==(const Pos& a, const Pos& b) {
-  return a.m_line == b.m_line && a.m_column == b.m_column;
-}
-
-inline bool operator!=(const Pos& a, const Pos& b) {
-  return a.m_line != b.m_line || a.m_column != b.m_column;
-}
-
-struct Event {
-  Pos m_pos;
-  bool m_isPressed;
-  unsigned long m_time;
-
-#if DEBUG_LOG
-  void print() const;
-#endif
-};
-
-#if DEBUG_LOG
-void Event::print() const {
-  debugPrint("Event(line: ");
-  debugPrint(m_pos.m_line);
-  debugPrint("\tcolumn: ");
-  debugPrint(m_pos.m_column);
-  debugPrint("\tisPressed: ");
-  debugPrint(m_isPressed);
-  debugPrint("\ttime: ");
-  debugPrint(m_time);
-  debugPrint(")");
-}
-#endif
+#include "event.h"
 
 class EventCircularBuffer {
 public:

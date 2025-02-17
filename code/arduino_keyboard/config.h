@@ -1,3 +1,5 @@
+#pragma once
+
 // Configuration dor logs, if any of the following setting is enabled the program will initialize the serial output.
 
 // If enabled, the program will write in the debug output the state of the event buffer and how it was processed.
