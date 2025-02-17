@@ -1,51 +1,27 @@
 
 #include "mbed.h"
+#include "config.h"
 #include "MCP23008.hpp"
 #include "PluggableUSBHID.h"
 #include "Keyboard.h"
 #include "KeyConfig.h"
 
-#define DEBUG_LOG 0
-#define I2C_RESET_LOG 0
-#define PERF_LOG 0
 
-#define VERSION 2
 
-#define NUM_LINES 5
-#define NUM_COLUMNS 12
-#define for_line_column for(int line = 0; line < NUM_LINES; ++line) for(int column = 0; column < NUM_COLUMNS; ++column)
-
-#define DEBOUNCE_TIME 10000 // micro-seconds
-#define ENTER_TIME 500000 // micro-seconds
-
-#if DEBUG_LOG
-#define debugPrint(x) Serial.print(x)
-#define debugPrintln(x) Serial.println(x)
-#define ON_DEBUG(x) x
-#else
-#define debugPrint(x)
-#define debugPrintln(x)
-#define ON_DEBUG(x)
-#endif
-
-struct Pos
-{
+struct Pos {
   int8_t m_line;
   int8_t m_column;
 };
 
-inline bool operator==(const Pos& a, const Pos& b)
-{
+inline bool operator==(const Pos& a, const Pos& b) {
   return a.m_line == b.m_line && a.m_column == b.m_column;
 }
 
-inline bool operator!=(const Pos& a, const Pos& b)
-{
+inline bool operator!=(const Pos& a, const Pos& b) {
   return a.m_line != b.m_line || a.m_column != b.m_column;
 }
 
-struct Event
-{
+struct Event {
   Pos m_pos;
   bool m_isPressed;
   unsigned long m_time;
@@ -56,8 +32,7 @@ struct Event
 };
 
 #if DEBUG_LOG
-void Event::print() const
-{
+void Event::print() const {
   debugPrint("Event(line: ");
   debugPrint(m_pos.m_line);
   debugPrint("\tcolumn: ");
@@ -70,91 +45,74 @@ void Event::print() const
 }
 #endif
 
-class EventCircularBuffer
-{
-  public:
-    inline Event& emplaceBack()
-    {
-      m_events[m_tail].m_deleted = false;
-      return m_events[m_tail++].m_item;
-    }
+class EventCircularBuffer {
+public:
+  inline Event& emplaceBack() {
+    m_events[m_tail].m_deleted = false;
+    return m_events[m_tail++].m_item;
+  }
 
-    inline void pushBack(const Event& e)
-    {
-      emplaceBack() = e;
-    }
+  inline void pushBack(const Event& e) {
+    emplaceBack() = e;
+  }
 
-    inline bool isEmpty() const
-    {
-      return m_head == m_tail;
-    }
+  inline bool isEmpty() const {
+    return m_head == m_tail;
+  }
 
-    inline const Event& peek() const
-    {
-      return m_events[m_head].m_item;
-    }
+  inline const Event& peek() const {
+    return m_events[m_head].m_item;
+  }
 
-    inline void popFront()
-    {
-      m_head = next(m_head);
-    }
+  inline void popFront() {
+    m_head = next(m_head);
+  }
 
-    inline uint8_t begin() const
-    {
-      return m_head;
-    }
+  inline uint8_t begin() const {
+    return m_head;
+  }
 
-    inline uint8_t next(uint8_t index)
-    {
-      do
-      {
-        index++;
-      } while (index != m_tail && m_events[index].m_deleted);
-      return index;
-    }
+  inline uint8_t next(uint8_t index) {
+    do {
+      index++;
+    } while (index != m_tail && m_events[index].m_deleted);
+    return index;
+  }
 
-    inline uint8_t end() const
-    {
-      return m_tail;
-    }
+  inline uint8_t end() const {
+    return m_tail;
+  }
 
-    inline const Event& operator[](uint8_t index) const
-    {
-      return m_events[index].m_item;
-    }
+  inline const Event& operator[](uint8_t index) const {
+    return m_events[index].m_item;
+  }
 
-    inline void remove(uint8_t index)
-    {
-      if (index == m_head)
-      {
-        m_head++;
-      }
-      else
-      {
-        m_events[index].m_deleted = true;
-      }
+  inline void remove(uint8_t index) {
+    if (index == m_head) {
+      m_head++;
+    } else {
+      m_events[index].m_deleted = true;
     }
+  }
 
 #if DEBUG_LOG
-    void print(const char* prefix = "");
+  void print(const char* prefix = "");
 #endif
 
-  private:
-    struct Item {
-      Event m_item;
-      bool m_deleted;
-    };
+private:
+  struct Item {
+    Event m_item;
+    bool m_deleted;
+  };
 
-    Item m_events[256];
-    uint8_t m_head = 0;
-    uint8_t m_tail = 0;
+  Item m_events[256];
+  uint8_t m_head = 0;
+  uint8_t m_tail = 0;
 };
 
 #if DEBUG_LOG
-void EventCircularBuffer::print(const char* prefix)
-{
-  for (uint8_t it = begin(); it != end(); ++it)
-  {
+void EventCircularBuffer::print(const char* prefix) {
+  for (uint8_t it = begin(); it != end(); ++it) {
     const Item& item = m_events[it];
     debugPrint(prefix);
     debugPrint(it);
@@ -166,61 +124,54 @@ void EventCircularBuffer::print(const char* prefix)
 }
 #endif
 
-class LayerTracker
-{
-  public:
-    inline void delta(LayerBit i, uint8_t d)
-    {
-      if (i > 0)
-      {
-        m_count[i - 1] += d;
+class LayerTracker {
+public:
+  inline void delta(LayerBit i, uint8_t d) {
+    if (i > 0) {
+      m_count[i - 1] += d;
 
-        // Update mask.
-        m_mask = 0;
-        for (uint8_t i = 0, p = 1; i < 8; ++i, p = p << 1)
-        {
-          m_mask = m_mask | (m_count[i] > 0 ? p : 0);
-        }
+      // Update mask.
+      m_mask = 0;
+      for (uint8_t i = 0, p = 1; i < 8; ++i, p = p << 1) {
+        m_mask = m_mask | (m_count[i] > 0 ? p : 0);
       }
     }
+  }
 
-    inline uint8_t mask()
-    {
-      return m_mask;
-    }
+  inline uint8_t mask() {
+    return m_mask;
+  }
 
-  private:
-    uint8_t m_count[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    uint8_t m_mask = 0;
+private:
+  uint8_t m_count[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+  uint8_t m_mask = 0;
 };
 
-static const Pos s_mcpToPos[8][8] =
-{
+static const Pos s_mcpToPos[8][8] = {
 #if VERSION == 1
-  {Pos{0, 6},  Pos{1, 6},  Pos{2, 6},  Pos{3, 6},  Pos{4, 6},  Pos{4, 7},  Pos{3, 7},  Pos{2, 7}},
-  {Pos{0, 7},  Pos{1, 7},  Pos{4, 8},  Pos{3, 8},  Pos{2, 8},  Pos{1, 8},  Pos{0, 8},  Pos{4, 9}},
-  {Pos{3, 9},  Pos{2, 9},  Pos{1, 9},  Pos{4, 10}, Pos{3, 10}, Pos{0, 9},  Pos{2, 10}, Pos{1, 10}},
-  {Pos{4, 11}, Pos{3, 11}, Pos{2, 11}, Pos{0, 10}, Pos{1, 11}, Pos{0, 11}, Pos{ -1, -1}, Pos{ -1, -1}},
-  {Pos{0, 0}, Pos{1, 0}, Pos{2, 0}, Pos{3, 0}, Pos{4, 0}, Pos{4, 1}, Pos{3, 1}, Pos{2, 1}},
-  {Pos{0, 1}, Pos{1, 1}, Pos{4, 2}, Pos{3, 2}, Pos{2, 2}, Pos{1, 2}, Pos{0, 2}, Pos{4, 3}},
-  {Pos{3, 3}, Pos{2, 3}, Pos{1, 3}, Pos{4, 4}, Pos{3, 4}, Pos{0, 3}, Pos{2, 4}, Pos{1, 4}},
-  {Pos{4, 5}, Pos{3, 5}, Pos{2, 5}, Pos{0, 4}, Pos{1, 5}, Pos{0, 5}, Pos{ -1, -1}, Pos{ -1, -1}},
+  { Pos{ 0, 6 }, Pos{ 1, 6 }, Pos{ 2, 6 }, Pos{ 3, 6 }, Pos{ 4, 6 }, Pos{ 4, 7 }, Pos{ 3, 7 }, Pos{ 2, 7 } },
+  { Pos{ 0, 7 }, Pos{ 1, 7 }, Pos{ 4, 8 }, Pos{ 3, 8 }, Pos{ 2, 8 }, Pos{ 1, 8 }, Pos{ 0, 8 }, Pos{ 4, 9 } },
+  { Pos{ 3, 9 }, Pos{ 2, 9 }, Pos{ 1, 9 }, Pos{ 4, 10 }, Pos{ 3, 10 }, Pos{ 0, 9 }, Pos{ 2, 10 }, Pos{ 1, 10 } },
+  { Pos{ 4, 11 }, Pos{ 3, 11 }, Pos{ 2, 11 }, Pos{ 0, 10 }, Pos{ 1, 11 }, Pos{ 0, 11 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
+  { Pos{ 0, 0 }, Pos{ 1, 0 }, Pos{ 2, 0 }, Pos{ 3, 0 }, Pos{ 4, 0 }, Pos{ 4, 1 }, Pos{ 3, 1 }, Pos{ 2, 1 } },
+  { Pos{ 0, 1 }, Pos{ 1, 1 }, Pos{ 4, 2 }, Pos{ 3, 2 }, Pos{ 2, 2 }, Pos{ 1, 2 }, Pos{ 0, 2 }, Pos{ 4, 3 } },
+  { Pos{ 3, 3 }, Pos{ 2, 3 }, Pos{ 1, 3 }, Pos{ 4, 4 }, Pos{ 3, 4 }, Pos{ 0, 3 }, Pos{ 2, 4 }, Pos{ 1, 4 } },
+  { Pos{ 4, 5 }, Pos{ 3, 5 }, Pos{ 2, 5 }, Pos{ 0, 4 }, Pos{ 1, 5 }, Pos{ 0, 5 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
 #else
-  {Pos{4, 8},  Pos{4, 7},  Pos{4, 6},  Pos{3, 7},  Pos{3, 6},  Pos{2, 6},  Pos{ -1, -1},  Pos{ -1, -1}},
-  {Pos{2, 7},  Pos{3, 8},  Pos{2, 8},  Pos{1, 8},  Pos{1, 7},  Pos{1, 6},  Pos{ -1, -1},  Pos{ -1, -1}},
-  {Pos{3, 9},  Pos{3, 10}, Pos{2, 10}, Pos{1, 10}, Pos{1, 9},  Pos{2, 9},  Pos{ -1, -1},  Pos{ -1, -1}},
-  
-  {Pos{4, 3},  Pos{4, 4},  Pos{4, 5},  Pos{3, 4},  Pos{3, 5},  Pos{2, 5},  Pos{ -1, -1},  Pos{ -1, -1}},
-  {Pos{2, 4},  Pos{3, 3},  Pos{2, 3},  Pos{1, 3},  Pos{1, 4},  Pos{1, 5},  Pos{ -1, -1},  Pos{ -1, -1}},
-  {Pos{3, 2},  Pos{3, 1},  Pos{2, 1},  Pos{1, 1},  Pos{1, 2},  Pos{2, 2},  Pos{ -1, -1},  Pos{ -1, -1}},
+  { Pos{ 4, 8 }, Pos{ 4, 7 }, Pos{ 4, 6 }, Pos{ 3, 7 }, Pos{ 3, 6 }, Pos{ 2, 6 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
+  { Pos{ 2, 7 }, Pos{ 3, 8 }, Pos{ 2, 8 }, Pos{ 1, 8 }, Pos{ 1, 7 }, Pos{ 1, 6 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
+  { Pos{ 3, 9 }, Pos{ 3, 10 }, Pos{ 2, 10 }, Pos{ 1, 10 }, Pos{ 1, 9 }, Pos{ 2, 9 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
+
+  { Pos{ 4, 3 }, Pos{ 4, 4 }, Pos{ 4, 5 }, Pos{ 3, 4 }, Pos{ 3, 5 }, Pos{ 2, 5 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
+  { Pos{ 2, 4 }, Pos{ 3, 3 }, Pos{ 2, 3 }, Pos{ 1, 3 }, Pos{ 1, 4 }, Pos{ 1, 5 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
+  { Pos{ 3, 2 }, Pos{ 3, 1 }, Pos{ 2, 1 }, Pos{ 1, 1 }, Pos{ 1, 2 }, Pos{ 2, 2 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
 #endif
 };
 
 bool s_switches[NUM_LINES][NUM_COLUMNS];
 uint8_t s_currentPressCount[NUM_LINES][NUM_COLUMNS];
 
-struct Mcp
-{
+struct Mcp {
   MCP23008* m_mcp;
   uint8_t m_offset;
 };
@@ -240,24 +191,23 @@ MCP23008 mcp6(6);
 MCP23008 mcp7(7);
 #endif
 
-static const Mcp s_mcps[] =
-{
+static const Mcp s_mcps[] = {
 #if VERSION == 1
-  Mcp{&mcp0, 0},
-  Mcp{&mcp1, 1},
-  Mcp{&mcp2, 2},
-  Mcp{&mcp3, 3},
-  Mcp{&mcp4, 4},
-  Mcp{&mcp5, 5},
-  Mcp{&mcp6, 6},
-  Mcp{&mcp7, 7},
+  Mcp{ &mcp0, 0 },
+  Mcp{ &mcp1, 1 },
+  Mcp{ &mcp2, 2 },
+  Mcp{ &mcp3, 3 },
+  Mcp{ &mcp4, 4 },
+  Mcp{ &mcp5, 5 },
+  Mcp{ &mcp6, 6 },
+  Mcp{ &mcp7, 7 },
 #else
-  Mcp{&mcp0, 0},
-  Mcp{&mcp1, 1},
-  Mcp{&mcp2, 2},
-  Mcp{&mcp4, 3},
-  Mcp{&mcp5, 4},
-  Mcp{&mcp6, 5},
+  Mcp{ &mcp0, 0 },
+  Mcp{ &mcp1, 1 },
+  Mcp{ &mcp2, 2 },
+  Mcp{ &mcp4, 3 },
+  Mcp{ &mcp5, 4 },
+  Mcp{ &mcp6, 5 },
 #endif
 };
 
@@ -266,67 +216,58 @@ Keyboard keyboard;
 EventCircularBuffer s_events;
 LayerTracker s_layerTracker;
 
-class KeyboardOutput
-{
-  public:
-    void add(Key k)
-    {
-      switch (k)
-      {
-        case Key::CTRL: m_modifiers = m_modifiers | MOD_CTRL; break;
-        case Key::SHIFT: m_modifiers = m_modifiers | MOD_SHIFT; break;
-        case Key::ALT: m_modifiers = m_modifiers | MOD_ALT; break;
-        case Key::WIN: m_modifiers = m_modifiers | MOD_WIN; break;
-        case Key::RCTRL: m_modifiers = m_modifiers | MOD_RCTRL; break;
-        case Key::RSHIFT: m_modifiers = m_modifiers | MOD_RSHIFT; break;
-        case Key::RALT: m_modifiers = m_modifiers | MOD_RALT; break;
-        case Key::RWIN: m_modifiers = m_modifiers | MOD_RWIN; break;
+class KeyboardOutput {
+public:
+  void add(Key k) {
+    switch (k) {
+      case Key::CTRL: m_modifiers = m_modifiers | MOD_CTRL; break;
+      case Key::SHIFT: m_modifiers = m_modifiers | MOD_SHIFT; break;
+      case Key::ALT: m_modifiers = m_modifiers | MOD_ALT; break;
+      case Key::WIN: m_modifiers = m_modifiers | MOD_WIN; break;
+      case Key::RCTRL: m_modifiers = m_modifiers | MOD_RCTRL; break;
+      case Key::RSHIFT: m_modifiers = m_modifiers | MOD_RSHIFT; break;
+      case Key::RALT: m_modifiers = m_modifiers | MOD_RALT; break;
+      case Key::RWIN: m_modifiers = m_modifiers | MOD_RWIN; break;
 
-        default:
-          if (m_nextKey < 6)
-          {
-            m_keys[m_nextKey] = uint8_t(k);
-            m_nextKey++;
-          }
-          break;
-      }
+      default:
+        if (m_nextKey < 6) {
+          m_keys[m_nextKey] = uint8_t(k);
+          m_nextKey++;
+        }
+        break;
     }
+  }
 
-    void add(MediaKey k)
-    {
-      m_mediaKey = uint8_t(k);
-    }
+  void add(MediaKey k) {
+    m_mediaKey = uint8_t(k);
+  }
 
-    inline void add(const K& keys)
-    {
-      if (keys.m_key0 != Key::NONE) add(keys.m_key0);
-      if (keys.m_key1 != Key::NONE) add(keys.m_key1);
-      if (keys.m_mediaKey != MediaKey::NONE) add(keys.m_mediaKey);
-    }
+  inline void add(const K& keys) {
+    if (keys.m_key0 != Key::NONE) add(keys.m_key0);
+    if (keys.m_key1 != Key::NONE) add(keys.m_key1);
+    if (keys.m_mediaKey != MediaKey::NONE) add(keys.m_mediaKey);
+  }
 
-    void send()
-    {
-      keyboard.press(m_keys, m_modifiers, m_mediaKey);
-    }
+  void send() {
+    keyboard.press(m_keys, m_modifiers, m_mediaKey);
+  }
 
-    inline bool isAnyKeyPressed()
-    {
-      return m_modifiers != 0 || m_nextKey != 0;
-    }
+  inline bool isAnyKeyPressed() {
+    return m_modifiers != 0 || m_nextKey != 0;
+  }
 #if DEBUG_LOG
-    void print() const;
+  void print() const;
 #endif
 
-  private:
-    uint8_t m_modifiers = 0;
-    uint8_t m_keys[6] = {0, 0, 0, 0, 0, 0};
-    int m_nextKey = 0;
-    uint8_t m_mediaKey = 0;
+private:
+  uint8_t m_modifiers = 0;
+  uint8_t m_keys[6] = { 0, 0, 0, 0, 0, 0 };
+  int m_nextKey = 0;
+  uint8_t m_mediaKey = 0;
 };
 
 #if DEBUG_LOG
-void KeyboardOutput::print() const
-{
+void KeyboardOutput::print() const {
   debugPrint("KeyboardOutput(modifiers: ");
   if (m_modifiers & MOD_CTRL) debugPrint("Ctrl ");
   if (m_modifiers & MOD_SHIFT) debugPrint("Shift ");
@@ -356,44 +297,40 @@ void KeyboardOutput::print() const
 
 Key s_forcedKey = Key::NONE;
 void fillCurrentKeyPress(KeyboardOutput& output);
-void fillCurrentKeyPress(KeyboardOutput& output)
-{
-  K (*currentLayer)[12] = s_keyMaps[s_layerTracker.mask()];
+void fillCurrentKeyPress(KeyboardOutput& output) {
+  K(*currentLayer)
+  [12] = s_keyMaps[s_layerTracker.mask()];
   debugPrint("\tLayer mask: ");
   debugPrintln(s_layerTracker.mask());
 
-  for_line_column {
-    if ( s_currentPressCount[line][column] > 0)
-    {
-      K key = currentLayer[line][column];
-      output.add(key);
+  for (int line = 0; line < NUM_LINES; ++line) {
+    for (int column = 0; column < NUM_COLUMNS; ++column) {
+      if (s_currentPressCount[line][column] > 0) {
+        K key = currentLayer[line][column];
+        output.add(key);
+      }
     }
   }
 
-  if (!output.isAnyKeyPressed() && s_layerTracker.mask() == 1)
-  {
+  if (!output.isAnyKeyPressed() && s_layerTracker.mask() == 1) {
     output.add(Key::SHIFT);
     debugPrintln("\tAdding shift");
   }
 
-  if (s_forcedKey != Key::NONE)
-  {
+  if (s_forcedKey != Key::NONE) {
     output.add(s_forcedKey);
   }
 }
 
-void resetI2C()
-{
-  if (s_i2c != nullptr)
-  {
+void resetI2C() {
+  if (s_i2c != nullptr) {
     delete s_i2c;
   }
   s_i2c = new I2C(p8, p9);
   s_i2c->frequency(400000);
   //s_i2c->frequency(100000);
 
-  for (const Mcp& mcp : s_mcps)
-  {
+  for (const Mcp& mcp : s_mcps) {
     mcp.m_mcp->setI2C(s_i2c);
     mcp.m_mcp->reset();
     mcp.m_mcp->set_input_pins(MCP23008::Pin_All);
@@ -401,17 +338,18 @@ void resetI2C()
   }
 }
 
-void setup()
-{
-#if DEBUG_LOG
+void setup() {
+#if ANY_LOG
   Serial.begin(9600);
 #endif
 
   resetI2C();
 
-  for_line_column {
-    s_switches[line][column] = false;
-    s_currentPressCount[line][column] = 0;
+  for (int line = 0; line < NUM_LINES; ++line) {
+    for (int column = 0; column < NUM_COLUMNS; ++column) {
+      s_switches[line][column] = false;
+      s_currentPressCount[line][column] = 0;
+    }
   }
 }
 
@@ -423,8 +361,7 @@ int perf_count = 0;
 static const int perf_countTotal = 1000;
 #endif
 
-void loop()
-{
+void loop() {
 #if PERF_LOG
   unsigned long perf_start = micros();
 #endif
@@ -435,11 +372,9 @@ void loop()
   int mcpErrorOffset;
 #endif
 
-  for (const Mcp& mcp : s_mcps)
-  {
+  for (const Mcp& mcp : s_mcps) {
     uint8_t pins = mcp.m_mcp->read_inputs();
-    if (mcp.m_mcp->isError())
-    {
+    if (mcp.m_mcp->isError()) {
       mcpError = true;
 #if I2C_RESET_LOG
       mcpErrorOffset = mcp.m_offset;
@@ -447,14 +382,11 @@ void loop()
       break;
     }
 
-    for (int pin = 0; pin < 8; ++pin)
-    {
+    for (int pin = 0; pin < 8; ++pin) {
       Pos pos = s_mcpToPos[mcp.m_offset][pin];
-      if (pos.m_line >= 0)
-      {
+      if (pos.m_line >= 0) {
         bool isPressed = !(pins & (1 << pin));
-        if (s_switches[pos.m_line][pos.m_column] != isPressed)
-        {
+        if (s_switches[pos.m_line][pos.m_column] != isPressed) {
           s_switches[pos.m_line][pos.m_column] = isPressed;
 
           Event& event = s_events.emplaceBack();
@@ -469,17 +401,14 @@ void loop()
   }
 
 #if DEBUG_LOG
-  if (anyNewEvent)
-  {
+  if (anyNewEvent) {
     debugPrintln("new events added to queue:");
     s_events.print("\t");
   }
 #endif
 
-  if (mcpError)
-  {
-    for (int i = 0; i < 10; ++i )
-    {
+  if (mcpError) {
+    for (int i = 0; i < 10; ++i) {
       delete s_i2c;
       s_i2c = new I2C(p8, p9);
     }
@@ -494,25 +423,21 @@ void loop()
   }
 
   unsigned long current = micros();
-  while (!s_events.isEmpty())
-  {
+  while (!s_events.isEmpty()) {
     const Event& event = s_events.peek();
 
     // First do debouncing.
     {
-      if (current - event.m_time < DEBOUNCE_TIME) break; // We have to wait a bit and pull the switches to check if we need to debounce.
+      if (current - event.m_time < DEBOUNCE_TIME) break;  // We have to wait a bit and pull the switches to check if we need to debounce.
 
       {
         bool debounced = false;
-        for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it))
-        {
-          if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME)
-          {
+        for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it)) {
+          if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME) {
             break;
           }
 
-          if (s_events[it].m_pos == event.m_pos && s_events[it].m_isPressed != event.m_isPressed)
-          {
+          if (s_events[it].m_pos == event.m_pos && s_events[it].m_isPressed != event.m_isPressed) {
             debugPrint("Cancel key\n");
             s_events.popFront();
             s_events.remove(it);
@@ -522,43 +447,35 @@ void loop()
         }
 
 #if DEBUG_LOG
-        if (debounced)
-        {
+        if (debounced) {
           debugPrintln("Debounced a key, event queue:");
           s_events.print("\t");
         }
 #endif
 
-        if (debounced) continue; // We debounced the current event, go to next.
+        if (debounced) continue;  // We debounced the current event, go to next.
       }
     }
-    if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed)
-    {
+    if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed) {
       bool foundRelease = false;
       bool foundAnotherPress = false;
       uint8_t releaseIndex;
-      for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it))
-      {
-        if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed)
-        {
+      for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it)) {
+        if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed) {
           foundRelease = true;
           releaseIndex = it;
           break;
         }
 
-        if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed)
-        {
+        if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed) {
           foundAnotherPress = true;
           break;
         }
       }
 
-      if (!foundAnotherPress)
-      {
-        if (foundRelease)
-        {
-          if (s_events[releaseIndex].m_time - event.m_time < ENTER_TIME)
-          {
+      if (!foundAnotherPress) {
+        if (foundRelease) {
+          if (s_events[releaseIndex].m_time - event.m_time < MAX_HOLD_TIME) {
             debugPrintln("Press and release key");
             s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
 
@@ -573,7 +490,7 @@ void loop()
             }
 
             s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
-            delay(50); // milliseconds
+            delay(KEY_PRESS_LENGTH);  // milliseconds
 
             {
               KeyboardOutput output;
@@ -603,35 +520,33 @@ void loop()
 
     // Update the press count of each button.
     uint8_t& pressCount = s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column];
-    if (event.m_isPressed)
-    {
+    if (event.m_isPressed) {
       pressCount++;
-    }
-    else
-    {
+    } else {
       if (pressCount > 0) pressCount--;
     }
 
     // Update forced key.
     {
-      K (*currentLayer)[12] = s_keyMaps[s_layerTracker.mask()];
+      K(*currentLayer)
+      [12] = s_keyMaps[s_layerTracker.mask()];
       Key forced = currentLayer[event.m_pos.m_line][event.m_pos.m_column].m_forcedKey;
-      if (forced != Key::NONE)
-      {
+      if (forced != Key::NONE) {
         s_forcedKey = forced;
       }
     }
 
     // Update the the layer (if any change).
     LayerBit layer = s_layerKeys[event.m_pos.m_line][event.m_pos.m_column];
-    if (layer != LAYER_NONE)
-    {
+    if (layer != LAYER_NONE) {
       s_layerTracker.delta(layer, event.m_isPressed ? +1 : -1);
 
       // Reset button presses when layer change.
-      for_line_column {
-        if (immuneToReset[line][column]) continue;
-        s_currentPressCount[line][column] = 0;
+      for(int line = 0; line < NUM_LINES; ++line) {
+        for (int column = 0; column < NUM_COLUMNS; ++column) {
+            if (immuneToReset[line][column]) continue;
+            s_currentPressCount[line][column] = 0;
+          }
       }
 
       s_forcedKey = Key::NONE;
@@ -639,13 +554,11 @@ void loop()
 
 #ifdef DEBUG_LOG
     debugPrintln("Current press count:");
-    for (int line = 0; line < NUM_LINES; ++line)
-    {
+    for (int line = 0; line < NUM_LINES; ++line) {
       debugPrint("\t");
-      for (int column = 0; column < NUM_COLUMNS; ++column)
-      {
+      for (int column = 0; column < NUM_COLUMNS; ++column) {
         if (column == 6) debugPrint(" ");
-        debugPrint( s_currentPressCount[line][column]);
+        debugPrint(s_currentPressCount[line][column]);
       }
       debugPrintln();
     }
@@ -674,8 +587,7 @@ void loop()
   perf_max = max(perf_max, total);
   perf_total += total;
   perf_count++;
-  if (perf_count == perf_countTotal)
-  {
+  if (perf_count == perf_countTotal) {
     unsigned long avg = perf_total / perf_countTotal;
     Serial.print("pulling perf min=");
     Serial.print(perf_min);
