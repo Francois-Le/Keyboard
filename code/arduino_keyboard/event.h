@@ -28,10 +28,123 @@ struct Event {
 #endif
 };
 
+
+/// FIFO queue for event. Support arbitrary removals. 
+///
+/// To support abitrary removal without memory copy we mark event that are deleted but leave them in the queue. The API of the queue will guarantee to never return them.
+class EventCircularBuffer {
+public:
+  /// Insert a new event at the end of queue and return a mutable reference to it.
+  inline Event& emplaceBack();
+
+  /// Add an event at the end of the queue.
+  inline void pushBack(const Event& e);
+
+  /// True if the queue is empty.
+  inline bool isEmpty() const;
+
+  /// Loot at the first event in the queue without consumint it.
+  inline const Event& peek() const;
+
+  /// Consume the first event in the queue.
+  inline void popFront();
+
+  /// Iterator to the first event in the queue.
+  inline uint8_t begin() const;
+
+  /// Gicen an iterator index, return an iterator to the next event.
+  inline uint8_t next(uint8_t index);
+
+  /// Iterator to the end of the queue.
+  inline uint8_t end() const;
+
+  /// Access an event in the queue with an iterator.
+  inline const Event& operator[](uint8_t index) const;
+ 
+  /// Remove the event at the iterator index in the queue. This does not need to be the first event in the queue. The events in the queue are not re-ordered.
+  inline void remove(uint8_t index);
+
+#if DEBUG_LOG
+  /// print the content of this event queue in the debug output.
+  void print(const char* prefix = "");
+#endif
+
+private:
+  /// An entry in the circular buffer
+  struct Item {
+    /// the value of the event for this entry.
+    Event m_item;
+
+    /// True if this event is deleted.
+    ///
+    /// This is set by EventCircularBuffer::remove(). Deleted entries are skiped when iterating on events in the queue.
+    bool m_deleted;
+  };
+
+  /// list of event in this queue.
+  Item m_events[256];
+
+  /// Index of the front of the queue.
+  uint8_t m_head = 0;
+
+  /// index of the element after the last in the queue.
+  uint8_t m_tail = 0;
+};
+
+// BELOW IS IMPLEMENTATION OF INLINE FUNCTIONS
+
 inline bool Pos::operator==(const Pos& other) const {
   return m_line == other.m_line && m_column == other.m_column;
 }
 
 inline bool Pos::operator!=(const Pos& other) const {
   return m_line != other.m_line || m_column != other.m_column;
+}
+
+inline Event& EventCircularBuffer::emplaceBack() {
+  m_events[m_tail].m_deleted = false;
+  return m_events[m_tail++].m_item;
+}
+
+inline void EventCircularBuffer::pushBack(const Event& e) {
+  emplaceBack() = e;
+}
+
+inline bool EventCircularBuffer::isEmpty() const {
+  return m_head == m_tail;
+}
+
+inline const Event& EventCircularBuffer::peek() const {
+  return m_events[m_head].m_item;
+}
+
+inline void EventCircularBuffer::popFront() {
+  m_head = next(m_head);
+}
+
+inline uint8_t EventCircularBuffer::begin() const {
+  return m_head;
+}
+
+inline uint8_t EventCircularBuffer::next(uint8_t index) {
+  do {
+    index++;
+  } while (index != m_tail && m_events[index].m_deleted);
+  return index;
+}
+
+inline uint8_t EventCircularBuffer::end() const {
+  return m_tail;
+}
+
+inline const Event& EventCircularBuffer::operator[](uint8_t index) const {
+  return m_events[index].m_item;
+}
+
+inline void EventCircularBuffer::remove(uint8_t index) {
+  if (index == m_head) {
+    m_head++;
+  } else {
+    m_events[index].m_deleted = true;
+  }
 }
