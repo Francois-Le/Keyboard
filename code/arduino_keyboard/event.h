@@ -29,13 +29,14 @@ struct Event {
 };
 
 
-/// FIFO queue for event. Support arbitrary removals. 
+/// FIFO queue for event. Support arbitrary removals.
 ///
 /// To support abitrary removal without memory copy we mark event that are deleted but leave them in the queue. The API of the queue will guarantee to never return them.
-class EventCircularBuffer {
+class EventQueue {
 public:
   /// Insert a new event at the end of queue and return a mutable reference to it.
-  inline Event& emplaceBack();
+  inline Event&
+  emplaceBack();
 
   /// Add an event at the end of the queue.
   inline void pushBack(const Event& e);
@@ -60,7 +61,7 @@ public:
 
   /// Access an event in the queue with an iterator.
   inline const Event& operator[](uint8_t index) const;
- 
+
   /// Remove the event at the iterator index in the queue. This does not need to be the first event in the queue. The events in the queue are not re-ordered.
   inline void remove(uint8_t index);
 
@@ -77,7 +78,7 @@ private:
 
     /// True if this event is deleted.
     ///
-    /// This is set by EventCircularBuffer::remove(). Deleted entries are skiped when iterating on events in the queue.
+    /// This is set by EventQueue::remove(). Deleted entries are skiped when iterating on events in the queue.
     bool m_deleted;
   };
 
@@ -101,47 +102,47 @@ inline bool Pos::operator!=(const Pos& other) const {
   return m_line != other.m_line || m_column != other.m_column;
 }
 
-inline Event& EventCircularBuffer::emplaceBack() {
+inline Event& EventQueue::emplaceBack() {
   m_events[m_tail].m_deleted = false;
   return m_events[m_tail++].m_item;
 }
 
-inline void EventCircularBuffer::pushBack(const Event& e) {
+inline void EventQueue::pushBack(const Event& e) {
   emplaceBack() = e;
 }
 
-inline bool EventCircularBuffer::isEmpty() const {
+inline bool EventQueue::isEmpty() const {
   return m_head == m_tail;
 }
 
-inline const Event& EventCircularBuffer::peek() const {
+inline const Event& EventQueue::peek() const {
   return m_events[m_head].m_item;
 }
 
-inline void EventCircularBuffer::popFront() {
+inline void EventQueue::popFront() {
   m_head = next(m_head);
 }
 
-inline uint8_t EventCircularBuffer::begin() const {
+inline uint8_t EventQueue::begin() const {
   return m_head;
 }
 
-inline uint8_t EventCircularBuffer::next(uint8_t index) {
+inline uint8_t EventQueue::next(uint8_t index) {
   do {
     index++;
   } while (index != m_tail && m_events[index].m_deleted);
   return index;
 }
 
-inline uint8_t EventCircularBuffer::end() const {
+inline uint8_t EventQueue::end() const {
   return m_tail;
 }
 
-inline const Event& EventCircularBuffer::operator[](uint8_t index) const {
+inline const Event& EventQueue::operator[](uint8_t index) const {
   return m_events[index].m_item;
 }
 
-inline void EventCircularBuffer::remove(uint8_t index) {
+inline void EventQueue::remove(uint8_t index) {
   if (index == m_head) {
     m_head++;
   } else {

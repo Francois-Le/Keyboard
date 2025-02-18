@@ -97,7 +97,7 @@ static const Mcp s_mcps[] = {
 
 Keyboard keyboard;
 
-EventCircularBuffer s_events;
+EventQueue s_events;
 LayerTracker s_layerTracker;
 
 class KeyboardOutput {
