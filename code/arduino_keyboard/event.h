@@ -39,6 +39,8 @@ public:
 
     inline bool operator==(Iterator other) const;
     inline bool operator!=(Iterator other) const;
+    inline Iterator& operator++();
+    inline Iterator operator*() const;
   };
 
   /// Insert a new event at the end of queue and return a mutable reference to it.
@@ -114,6 +116,15 @@ inline bool EventQueue::Iterator::operator==(Iterator other) const {
 
 inline bool EventQueue::Iterator::operator!=(Iterator other) const {
   return m_index != other.m_index;
+}
+
+inline EventQueue::Iterator& EventQueue::Iterator::operator++() {
+  ++m_index;
+  return *this;
+}
+
+inline EventQueue::Iterator EventQueue::Iterator::operator*() const {
+  return *this;
 }
 
 inline Event& EventQueue::emplaceBack() {
