@@ -316,7 +316,7 @@ void loop() {
 
       {
         bool debounced = false;
-        for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it)) {
+        for (EventQueue::Iterator it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it)) {
           if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME) {
             break;
           }
@@ -343,8 +343,8 @@ void loop() {
     if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed) {
       bool foundRelease = false;
       bool foundAnotherPress = false;
-      uint8_t releaseIndex;
-      for (uint8_t it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it)) {
+      EventQueue::Iterator releaseIndex;
+      for (EventQueue::Iterator it = s_events.next(s_events.begin()); it != s_events.end(); it = s_events.next(it)) {
         if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed) {
           foundRelease = true;
           releaseIndex = it;

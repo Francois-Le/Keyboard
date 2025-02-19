@@ -34,9 +34,15 @@ struct Event {
 /// To support abitrary removal without memory copy we mark event that are deleted but leave them in the queue. The API of the queue will guarantee to never return them.
 class EventQueue {
 public:
+  struct Iterator {
+    uint8_t m_index;
+
+    inline bool operator==(Iterator other) const;
+    inline bool operator!=(Iterator other) const;
+  };
+
   /// Insert a new event at the end of queue and return a mutable reference to it.
-  inline Event&
-  emplaceBack();
+  inline Event& emplaceBack();
 
   /// Add an event at the end of the queue.
   inline void pushBack(const Event& e);
@@ -51,19 +57,19 @@ public:
   inline void popFront();
 
   /// Iterator to the first event in the queue.
-  inline uint8_t begin() const;
+  inline Iterator begin() const;
 
   /// Gicen an iterator index, return an iterator to the next event.
-  inline uint8_t next(uint8_t index);
+  inline Iterator next(Iterator it);
 
   /// Iterator to the end of the queue.
-  inline uint8_t end() const;
+  inline Iterator end() const;
 
   /// Access an event in the queue with an iterator.
-  inline const Event& operator[](uint8_t index) const;
+  inline const Event& operator[](Iterator it) const;
 
   /// Remove the event at the iterator index in the queue. This does not need to be the first event in the queue. The events in the queue are not re-ordered.
-  inline void remove(uint8_t index);
+  inline void remove(Iterator it);
 
 #if DEBUG_LOG
   /// print the content of this event queue in the debug output.
@@ -86,10 +92,10 @@ private:
   Item m_events[256];
 
   /// Index of the front of the queue.
-  uint8_t m_head = 0;
+  Iterator m_head{ 0 };
 
   /// index of the element after the last in the queue.
-  uint8_t m_tail = 0;
+  Iterator m_tail{ 0 };
 };
 
 // BELOW IS IMPLEMENTATION OF INLINE FUNCTIONS
@@ -102,9 +108,17 @@ inline bool Pos::operator!=(const Pos& other) const {
   return m_line != other.m_line || m_column != other.m_column;
 }
 
+inline bool EventQueue::Iterator::operator==(Iterator other) const {
+  return m_index == other.m_index;
+}
+
+inline bool EventQueue::Iterator::operator!=(Iterator other) const {
+  return m_index != other.m_index;
+}
+
 inline Event& EventQueue::emplaceBack() {
-  m_events[m_tail].m_deleted = false;
-  return m_events[m_tail++].m_item;
+  m_events[m_tail.m_index].m_deleted = false;
+  return m_events[m_tail.m_index++].m_item;
 }
 
 inline void EventQueue::pushBack(const Event& e) {
@@ -116,36 +130,36 @@ inline bool EventQueue::isEmpty() const {
 }
 
 inline const Event& EventQueue::peek() const {
-  return m_events[m_head].m_item;
+  return m_events[m_head.m_index].m_item;
 }
 
 inline void EventQueue::popFront() {
   m_head = next(m_head);
 }
 
-inline uint8_t EventQueue::begin() const {
+inline EventQueue::Iterator EventQueue::begin() const {
   return m_head;
 }
 
-inline uint8_t EventQueue::next(uint8_t index) {
+inline EventQueue::Iterator EventQueue::next(Iterator it) {
   do {
-    index++;
-  } while (index != m_tail && m_events[index].m_deleted);
-  return index;
+    it.m_index++;
+  } while (it != m_tail && m_events[it.m_index].m_deleted);
+  return it;
 }
 
-inline uint8_t EventQueue::end() const {
+inline EventQueue::Iterator EventQueue::end() const {
   return m_tail;
 }
 
-inline const Event& EventQueue::operator[](uint8_t index) const {
-  return m_events[index].m_item;
+inline const Event& EventQueue::operator[](Iterator it) const {
+  return m_events[it.m_index].m_item;
 }
 
-inline void EventQueue::remove(uint8_t index) {
-  if (index == m_head) {
-    m_head++;
+inline void EventQueue::remove(Iterator it) {
+  if (it == m_head) {
+    m_head.m_index++;
   } else {
-    m_events[index].m_deleted = true;
+    m_events[it.m_index].m_deleted = true;
   }
 }
