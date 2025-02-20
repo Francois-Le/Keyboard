@@ -1,6 +1,6 @@
 #include "mbed.h"
 #include "config.h"
-#include "MCP23008.hpp"
+#include "input.h"
 #include "PluggableUSBHID.h"
 #include "Keyboard.h"
 #include "KeyConfig.h"
@@ -31,69 +31,11 @@ private:
   uint8_t m_mask = 0;
 };
 
-static const Pos s_mcpToPos[8][8] = {
-#if VERSION == 1
-  { Pos{ 0, 6 }, Pos{ 1, 6 }, Pos{ 2, 6 }, Pos{ 3, 6 }, Pos{ 4, 6 }, Pos{ 4, 7 }, Pos{ 3, 7 }, Pos{ 2, 7 } },
-  { Pos{ 0, 7 }, Pos{ 1, 7 }, Pos{ 4, 8 }, Pos{ 3, 8 }, Pos{ 2, 8 }, Pos{ 1, 8 }, Pos{ 0, 8 }, Pos{ 4, 9 } },
-  { Pos{ 3, 9 }, Pos{ 2, 9 }, Pos{ 1, 9 }, Pos{ 4, 10 }, Pos{ 3, 10 }, Pos{ 0, 9 }, Pos{ 2, 10 }, Pos{ 1, 10 } },
-  { Pos{ 4, 11 }, Pos{ 3, 11 }, Pos{ 2, 11 }, Pos{ 0, 10 }, Pos{ 1, 11 }, Pos{ 0, 11 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
-  { Pos{ 0, 0 }, Pos{ 1, 0 }, Pos{ 2, 0 }, Pos{ 3, 0 }, Pos{ 4, 0 }, Pos{ 4, 1 }, Pos{ 3, 1 }, Pos{ 2, 1 } },
-  { Pos{ 0, 1 }, Pos{ 1, 1 }, Pos{ 4, 2 }, Pos{ 3, 2 }, Pos{ 2, 2 }, Pos{ 1, 2 }, Pos{ 0, 2 }, Pos{ 4, 3 } },
-  { Pos{ 3, 3 }, Pos{ 2, 3 }, Pos{ 1, 3 }, Pos{ 4, 4 }, Pos{ 3, 4 }, Pos{ 0, 3 }, Pos{ 2, 4 }, Pos{ 1, 4 } },
-  { Pos{ 4, 5 }, Pos{ 3, 5 }, Pos{ 2, 5 }, Pos{ 0, 4 }, Pos{ 1, 5 }, Pos{ 0, 5 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
-#else
-  { Pos{ 4, 8 }, Pos{ 4, 7 }, Pos{ 4, 6 }, Pos{ 3, 7 }, Pos{ 3, 6 }, Pos{ 2, 6 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
-  { Pos{ 2, 7 }, Pos{ 3, 8 }, Pos{ 2, 8 }, Pos{ 1, 8 }, Pos{ 1, 7 }, Pos{ 1, 6 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
-  { Pos{ 3, 9 }, Pos{ 3, 10 }, Pos{ 2, 10 }, Pos{ 1, 10 }, Pos{ 1, 9 }, Pos{ 2, 9 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
-
-  { Pos{ 4, 3 }, Pos{ 4, 4 }, Pos{ 4, 5 }, Pos{ 3, 4 }, Pos{ 3, 5 }, Pos{ 2, 5 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
-  { Pos{ 2, 4 }, Pos{ 3, 3 }, Pos{ 2, 3 }, Pos{ 1, 3 }, Pos{ 1, 4 }, Pos{ 1, 5 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
-  { Pos{ 3, 2 }, Pos{ 3, 1 }, Pos{ 2, 1 }, Pos{ 1, 1 }, Pos{ 1, 2 }, Pos{ 2, 2 }, Pos{ -1, -1 }, Pos{ -1, -1 } },
-#endif
-};
-
-bool s_switches[NUM_LINES][NUM_COLUMNS];
 uint8_t s_currentPressCount[NUM_LINES][NUM_COLUMNS];
 
-struct Mcp {
-  MCP23008* m_mcp;
-  uint8_t m_offset;
-};
 
-//I2C i2c(p8, p9);
-I2C* s_i2c = nullptr;
-MCP23008 mcp0(0);
-MCP23008 mcp1(1);
-MCP23008 mcp2(2);
-#if VERSION == 1
-MCP23008 mcp3(3);
-#endif
-MCP23008 mcp4(4);
-MCP23008 mcp5(5);
-MCP23008 mcp6(6);
-#if VERSION == 1
-MCP23008 mcp7(7);
-#endif
 
-static const Mcp s_mcps[] = {
-#if VERSION == 1
-  Mcp{ &mcp0, 0 },
-  Mcp{ &mcp1, 1 },
-  Mcp{ &mcp2, 2 },
-  Mcp{ &mcp3, 3 },
-  Mcp{ &mcp4, 4 },
-  Mcp{ &mcp5, 5 },
-  Mcp{ &mcp6, 6 },
-  Mcp{ &mcp7, 7 },
-#else
-  Mcp{ &mcp0, 0 },
-  Mcp{ &mcp1, 1 },
-  Mcp{ &mcp2, 2 },
-  Mcp{ &mcp4, 3 },
-  Mcp{ &mcp5, 4 },
-  Mcp{ &mcp6, 5 },
-#endif
-};
+
 
 Keyboard keyboard;
 
@@ -206,32 +148,17 @@ void fillCurrentKeyPress(KeyboardOutput& output) {
   }
 }
 
-void resetI2C() {
-  if (s_i2c != nullptr) {
-    delete s_i2c;
-  }
-  s_i2c = new I2C(p8, p9);
-  s_i2c->frequency(400000);
-  //s_i2c->frequency(100000);
 
-  for (const Mcp& mcp : s_mcps) {
-    mcp.m_mcp->setI2C(s_i2c);
-    mcp.m_mcp->reset();
-    mcp.m_mcp->set_input_pins(MCP23008::Pin_All);
-    mcp.m_mcp->set_pullups(MCP23008::Pin_All);
-  }
-}
 
 void setup() {
 #if ANY_LOG
   Serial.begin(9600);
 #endif
 
-  resetI2C();
+  Input::init();
 
   for (int line = 0; line < NUM_LINES; ++line) {
     for (int column = 0; column < NUM_COLUMNS; ++column) {
-      s_switches[line][column] = false;
       s_currentPressCount[line][column] = 0;
     }
   }
@@ -250,36 +177,19 @@ void loop() {
   unsigned long perf_start = micros();
 #endif
 
+  Input::step();
+
   ON_DEBUG(bool anyNewEvent = false);
-  bool mcpError = false;
-#if I2C_RESET_LOG
-  int mcpErrorOffset;
-#endif
+  for (int line = 0; line < NUM_LINES; ++line) {
+    for (int column = 0; column < NUM_COLUMNS; ++column) {
 
-  for (const Mcp& mcp : s_mcps) {
-    uint8_t pins = mcp.m_mcp->read_inputs();
-    if (mcp.m_mcp->isError()) {
-      mcpError = true;
-#if I2C_RESET_LOG
-      mcpErrorOffset = mcp.m_offset;
-#endif
-      break;
-    }
+      if (Input::hasChanged(line, column)) {
+        Event& event = s_events.emplaceBack();
+        event.m_pos = Pos{ line, column };
+        event.m_isPressed = Input::isPressed(line, column);
+        event.m_time = micros();
 
-    for (int pin = 0; pin < 8; ++pin) {
-      Pos pos = s_mcpToPos[mcp.m_offset][pin];
-      if (pos.m_line >= 0) {
-        bool isPressed = !(pins & (1 << pin));
-        if (s_switches[pos.m_line][pos.m_column] != isPressed) {
-          s_switches[pos.m_line][pos.m_column] = isPressed;
-
-          Event& event = s_events.emplaceBack();
-          event.m_pos = pos;
-          event.m_isPressed = isPressed;
-          event.m_time = micros();
-
-          ON_DEBUG(anyNewEvent = true);
-        }
+        ON_DEBUG(anyNewEvent = true);
       }
     }
   }
@@ -290,21 +200,6 @@ void loop() {
     s_events.print("\t");
   }
 #endif
-
-  if (mcpError) {
-    for (int i = 0; i < 10; ++i) {
-      delete s_i2c;
-      s_i2c = new I2C(p8, p9);
-    }
-    resetI2C();
-
-#if I2C_RESET_LOG
-    Serial.print("Reset i2c (source offset: ");
-    Serial.print(mcpErrorOffset);
-    Serial.println(")");
-#endif
-    return;
-  }
 
   unsigned long current = micros();
   while (!s_events.isEmpty()) {
@@ -426,11 +321,11 @@ void loop() {
       s_layerTracker.delta(layer, event.m_isPressed ? +1 : -1);
 
       // Reset button presses when layer change.
-      for(int line = 0; line < NUM_LINES; ++line) {
+      for (int line = 0; line < NUM_LINES; ++line) {
         for (int column = 0; column < NUM_COLUMNS; ++column) {
-            if (immuneToReset[line][column]) continue;
-            s_currentPressCount[line][column] = 0;
-          }
+          if (immuneToReset[line][column]) continue;
+          s_currentPressCount[line][column] = 0;
+        }
       }
 
       s_forcedKey = Key::NONE;
