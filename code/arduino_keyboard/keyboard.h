@@ -1,7 +1,5 @@
 #pragma once
-#include "PluggableUSBHID.h"
-#include "platform/Stream.h"
-#include "PlatformMutex.h"
+#include "stdint.h"
 
 enum ModifierKeys {
   MOD_CTRL = 0x01,
@@ -14,10 +12,9 @@ enum ModifierKeys {
   MOD_RWIN = 0x80,
 };
 
-enum class Key
-{
+enum class Key {
   NONE = 0,
-  
+
   A = 0x14,
   B = 0x05,
   C = 0x06,
@@ -44,7 +41,7 @@ enum class Key
   X = 0x1B,
   Y = 0x1C,
   Z = 0x1A,
-  
+
   P1 = 0x2F,
   P2 = 0x30,
   M1 = 0x34,
@@ -54,7 +51,7 @@ enum class Key
   N3 = 0x37,
   N4 = 0x38,
   W1 = 0x64,
-  
+
   POW_2 = 0x35,
   D1 = 0x1E,
   D2 = 0x1F,
@@ -68,7 +65,7 @@ enum class Key
   D0 = 0x27,
   D01 = 0x2D,
   D02 = 0x2E,
-  
+
   ESC = 0x29,
   F1 = 0x3A,
   F2 = 0x3B,
@@ -82,7 +79,7 @@ enum class Key
   F10 = 0x43,
   F11 = 0x44,
   F12 = 0x45,
-  
+
   DEL = 0x4C,
   INS = 0x49,
   END = 0x4D,
@@ -92,7 +89,7 @@ enum class Key
   PRI_SCR = 0x46,
   LOCK_SC = 0x47,
   PAUSE = 0x48,
-  
+
   NUM_0 = 0x62,
   NUM_1 = 0x59,
   NUM_2 = 0x5A,
@@ -109,12 +106,12 @@ enum class Key
   NUM_MUL = 0x55,
   NUM_DIV = 0x54,
   NUM_LOCK = 0x53,
-  
+
   UP = 0x52,
   DOWN = 0x51,
   LEFT = 0x50,
   RIGHT = 0x4F,
-  
+
   CAP_LOCK = 0x39,
   TAB = 0x2B,
   SPACE = 0x2C,
@@ -132,27 +129,60 @@ enum class Key
   RWIN = 0xE7,
 };
 
-enum class MediaKey
-{
+enum class MediaKey {
   NONE = 0,
-  
+
   VOLUME_UP = 0x20,
   VOLUME_DOWN = 0x40,
 };
 
-class Keyboard: public USBHID {
+class KeyboardOutput {
 public:
-    Keyboard(uint16_t vendor_id = 0x1235, uint16_t product_id = 0x0050, uint16_t product_release = 0x0001);
-    virtual ~Keyboard();
+  inline void add(Key k);
 
-    void press(uint8_t* keys, uint8_t modifiers, uint8_t mediaKey);
-    void releaseAll();
+  inline void add(MediaKey k);
 
-protected:
-    virtual const uint8_t *report_desc() override;
-    virtual const uint8_t *configuration_desc(uint8_t index) override;
+  void send();
+
+  inline bool isAnyKeyPressed();
+
+#if DEBUG_LOG
+  void print() const;
+#endif
 
 private:
-    uint8_t _configuration_descriptor[41];
-
+  uint8_t m_modifiers = 0;
+  uint8_t m_keys[6] = { 0, 0, 0, 0, 0, 0 };
+  int m_nextKey = 0;
+  uint8_t m_mediaKey = 0;
 };
+
+// BELOW IS IMPLEMENTATION OF INLINE FUNCTIONS
+
+inline void KeyboardOutput::add(Key k) {
+  switch (k) {
+    case Key::CTRL: m_modifiers = m_modifiers | MOD_CTRL; break;
+    case Key::SHIFT: m_modifiers = m_modifiers | MOD_SHIFT; break;
+    case Key::ALT: m_modifiers = m_modifiers | MOD_ALT; break;
+    case Key::WIN: m_modifiers = m_modifiers | MOD_WIN; break;
+    case Key::RCTRL: m_modifiers = m_modifiers | MOD_RCTRL; break;
+    case Key::RSHIFT: m_modifiers = m_modifiers | MOD_RSHIFT; break;
+    case Key::RALT: m_modifiers = m_modifiers | MOD_RALT; break;
+    case Key::RWIN: m_modifiers = m_modifiers | MOD_RWIN; break;
+
+    default:
+      if (m_nextKey < 6) {
+        m_keys[m_nextKey] = uint8_t(k);
+        m_nextKey++;
+      }
+      break;
+  }
+}
+
+inline void KeyboardOutput::add(MediaKey k) {
+  m_mediaKey = uint8_t(k);
+}
+
+inline bool KeyboardOutput::isAnyKeyPressed() {
+  return m_modifiers != 0 || m_nextKey != 0;
+}

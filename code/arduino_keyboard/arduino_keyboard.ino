@@ -33,93 +33,14 @@ private:
 
 uint8_t s_currentPressCount[NUM_LINES][NUM_COLUMNS];
 
-
-
-
-
-Keyboard keyboard;
-
 EventQueue s_events;
 LayerTracker s_layerTracker;
 
-class KeyboardOutput {
-public:
-  void add(Key k) {
-    switch (k) {
-      case Key::CTRL: m_modifiers = m_modifiers | MOD_CTRL; break;
-      case Key::SHIFT: m_modifiers = m_modifiers | MOD_SHIFT; break;
-      case Key::ALT: m_modifiers = m_modifiers | MOD_ALT; break;
-      case Key::WIN: m_modifiers = m_modifiers | MOD_WIN; break;
-      case Key::RCTRL: m_modifiers = m_modifiers | MOD_RCTRL; break;
-      case Key::RSHIFT: m_modifiers = m_modifiers | MOD_RSHIFT; break;
-      case Key::RALT: m_modifiers = m_modifiers | MOD_RALT; break;
-      case Key::RWIN: m_modifiers = m_modifiers | MOD_RWIN; break;
-
-      default:
-        if (m_nextKey < 6) {
-          m_keys[m_nextKey] = uint8_t(k);
-          m_nextKey++;
-        }
-        break;
-    }
-  }
-
-  void add(MediaKey k) {
-    m_mediaKey = uint8_t(k);
-  }
-
-  inline void add(const K& keys) {
-    if (keys.m_key0 != Key::NONE) add(keys.m_key0);
-    if (keys.m_key1 != Key::NONE) add(keys.m_key1);
-    if (keys.m_mediaKey != MediaKey::NONE) add(keys.m_mediaKey);
-  }
-
-  void send() {
-    keyboard.press(m_keys, m_modifiers, m_mediaKey);
-  }
-
-  inline bool isAnyKeyPressed() {
-    return m_modifiers != 0 || m_nextKey != 0;
-  }
-#if DEBUG_LOG
-  void print() const;
-#endif
-
-private:
-  uint8_t m_modifiers = 0;
-  uint8_t m_keys[6] = { 0, 0, 0, 0, 0, 0 };
-  int m_nextKey = 0;
-  uint8_t m_mediaKey = 0;
-};
-
-#if DEBUG_LOG
-void KeyboardOutput::print() const {
-  debugPrint("KeyboardOutput(modifiers: ");
-  if (m_modifiers & MOD_CTRL) debugPrint("Ctrl ");
-  if (m_modifiers & MOD_SHIFT) debugPrint("Shift ");
-  if (m_modifiers & MOD_ALT) debugPrint("Alt ");
-  if (m_modifiers & MOD_WIN) debugPrint("Win ");
-  if (m_modifiers & MOD_RCTRL) debugPrint("Left_Ctrl ");
-  if (m_modifiers & MOD_RSHIFT) debugPrint("Left_Shift ");
-  if (m_modifiers & MOD_RALT) debugPrint("Left_Alt ");
-  if (m_modifiers & MOD_RWIN) debugPrint("Left_Win ");
-  debugPrint("keys: ");
-  debugPrint(m_keys[0]);
-  debugPrint(" ");
-  debugPrint(m_keys[1]);
-  debugPrint(" ");
-  debugPrint(m_keys[2]);
-  debugPrint(" ");
-  debugPrint(m_keys[3]);
-  debugPrint(" ");
-  debugPrint(m_keys[4]);
-  debugPrint(" ");
-  debugPrint(m_keys[5]);
-  debugPrint(" media_key: ");
-  debugPrint(m_mediaKey);
-  debugPrint(")");
+inline void addK(const K& keys, KeyboardOutput& output) {
+  if (keys.m_key0 != Key::NONE) output.add(keys.m_key0);
+  if (keys.m_key1 != Key::NONE) output.add(keys.m_key1);
+  if (keys.m_mediaKey != MediaKey::NONE) output.add(keys.m_mediaKey);
 }
-#endif
 
 Key s_forcedKey = Key::NONE;
 void fillCurrentKeyPress(KeyboardOutput& output);
@@ -133,18 +54,18 @@ void fillCurrentKeyPress(KeyboardOutput& output) {
     for (int column = 0; column < NUM_COLUMNS; ++column) {
       if (s_currentPressCount[line][column] > 0) {
         K key = currentLayer[line][column];
-        output.add(key);
+        addK(key, output);
       }
     }
   }
 
   if (!output.isAnyKeyPressed() && s_layerTracker.mask() == 1) {
-    output.add(Key::SHIFT);
+    addK(Key::SHIFT, output);
     debugPrintln("\tAdding shift");
   }
 
   if (s_forcedKey != Key::NONE) {
-    output.add(s_forcedKey);
+    addK(s_forcedKey, output);
   }
 }
 
