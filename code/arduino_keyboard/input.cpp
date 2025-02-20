@@ -2,7 +2,16 @@
 #include "pos.h"
 #include "MCP23008.hpp"
 
+#if VERSION == 1
+#define NUM_MCP_CHIPS 8
+#else
+#define NUM_MCP_CHIPS 6
+#endif
+
+/// Namespace containing all the implementation details of the input system.
 namespace InputImpl {
+
+/// Indicate which key coordinates each input of each MCP is responsible for. m_mcp[i][j] is the key location for the j-th channel of the i-th MCP chip.
 static const Pos s_mcpToPos[8][8] = {
 #if VERSION == 1
   { Pos{ 0, 6 }, Pos{ 1, 6 }, Pos{ 2, 6 }, Pos{ 3, 6 }, Pos{ 4, 6 }, Pos{ 4, 7 }, Pos{ 3, 7 }, Pos{ 2, 7 } },
@@ -24,48 +33,37 @@ static const Pos s_mcpToPos[8][8] = {
 #endif
 };
 
-struct Mcp {
-  MCP23008* m_mcp;
-  uint8_t m_offset;
-};
-
+/// The I2C handle, setup by Input::Init().
 I2C* s_i2c = nullptr;
-MCP23008 mcp0(0);
-MCP23008 mcp1(1);
-MCP23008 mcp2(2);
-#if VERSION == 1
-MCP23008 mcp3(3);
-#endif
-MCP23008 mcp4(4);
-MCP23008 mcp5(5);
-MCP23008 mcp6(6);
-#if VERSION == 1
-MCP23008 mcp7(7);
-#endif
 
-static const Mcp s_mcps[] = {
+/// All MCP IO handles, passing the addressed on the I2C bus.
+static MCP23008 s_mcps[] = {
 #if VERSION == 1
-  Mcp{ &mcp0, 0 },
-  Mcp{ &mcp1, 1 },
-  Mcp{ &mcp2, 2 },
-  Mcp{ &mcp3, 3 },
-  Mcp{ &mcp4, 4 },
-  Mcp{ &mcp5, 5 },
-  Mcp{ &mcp6, 6 },
-  Mcp{ &mcp7, 7 },
+  MCP23008(0),
+  MCP23008(1),
+  MCP23008(2),
+  MCP23008(3),
+  MCP23008(4),
+  MCP23008(5),
+  MCP23008(6),
+  MCP23008(7),
 #else
-  Mcp{ &mcp0, 0 },
-  Mcp{ &mcp1, 1 },
-  Mcp{ &mcp2, 2 },
-  Mcp{ &mcp4, 3 },
-  Mcp{ &mcp5, 4 },
-  Mcp{ &mcp6, 5 },
+  MCP23008(0),
+  MCP23008(1),
+  MCP23008(2),
+  MCP23008(3),
+  MCP23008(4),
+  MCP23008(5),
 #endif
 };
 
-bool s_switches[NUM_LINES][NUM_COLUMNS];
-bool s_switchesChanged[NUM_LINES][NUM_COLUMNS];
+/// The current state of every switch. True mean pressed, false mean released.
+bool s_state[NUM_LINES][NUM_COLUMNS];
 
+/// Indicate if the state each switch have changed in the last call to Input::step().
+bool s_stateChanged[NUM_LINES][NUM_COLUMNS];
+
+/// Reset the I2C bus and initialize each MCP chip.
 void resetI2C() {
   if (s_i2c != nullptr) {
     delete s_i2c;
@@ -74,11 +72,11 @@ void resetI2C() {
   s_i2c->frequency(400000);
   //s_i2c->frequency(100000);
 
-  for (const Mcp& mcp : s_mcps) {
-    mcp.m_mcp->setI2C(s_i2c);
-    mcp.m_mcp->reset();
-    mcp.m_mcp->set_input_pins(MCP23008::Pin_All);
-    mcp.m_mcp->set_pullups(MCP23008::Pin_All);
+  for (MCP23008& mcp : s_mcps) {
+    mcp.setI2C(s_i2c);
+    mcp.reset();
+    mcp.set_input_pins(MCP23008::Pin_All);
+    mcp.set_pullups(MCP23008::Pin_All);
   }
 }
 }
@@ -88,10 +86,11 @@ void Input::init() {
 
   resetI2C();
 
+  // Set the initial state.
   for (int line = 0; line < NUM_LINES; ++line) {
     for (int column = 0; column < NUM_COLUMNS; ++column) {
-      s_switches[line][column] = false;
-      s_switchesChanged[line][column] = false;
+      s_state[line][column] = false;
+      s_stateChanged[line][column] = false;
       //s_currentPressCount[line][column] = 0;
     }
   }
@@ -101,40 +100,54 @@ void Input::step() {
 
   bool mcpError = false;
 #if I2C_RESET_LOG
-  int mcpErrorOffset;
+  int mcpErrorIndex;
 #endif
 
-  for (const Mcp& mcp : s_mcps) {
-    uint8_t pins = mcp.m_mcp->read_inputs();
-    if (mcp.m_mcp->isError()) {
+  // We read all all the MCP first.
+  // We do this first because we want to sure we can updates all the s_stateChanged otherwise if we stop midway through in case of error we would could skip some s_stateChanged.
+  uint8_t pinsForMcp[NUM_MCP_CHIPS];
+  for (int mcpIndex = 0; mcpIndex < NUM_MCP_CHIPS; ++mcpIndex) {
+    pinsForMcp[mcpIndex] = s_mcps[mcpIndex].read_inputs();
+
+    if (s_mcps[mcpIndex].isError()) {
       mcpError = true;
 #if I2C_RESET_LOG
-      mcpErrorOffset = mcp.m_offset;
+      mcpErrorIndex = mcpIndex;
 #endif
       break;
     }
-
-    for (int pin = 0; pin < 8; ++pin) {
-      Pos pos = s_mcpToPos[mcp.m_offset][pin];
-      if (pos.m_line >= 0) {
-        bool isPressed = !(pins & (1 << pin));
-        s_switchesChanged[pos.m_line][pos.m_column] = s_switches[pos.m_line][pos.m_column] != isPressed;
-        s_switches[pos.m_line][pos.m_column] = isPressed;
-      }
-    }
   }
 
-  if (mcpError) {
+  if (!mcpError) {
+    // If there was no issue reading the MCPs, we update all the switches state.
+    for (int mcpIndex = 0; mcpIndex < NUM_MCP_CHIPS; ++mcpIndex) {
+      uint8_t pins = pinsForMcp[mcpIndex];
+
+      for (int pin = 0; pin < 8; ++pin) {
+        Pos pos = s_mcpToPos[mcpIndex][pin];
+        if (pos.m_line >= 0) {
+          bool isPressed = !(pins & (1 << pin));
+          s_stateChanged[pos.m_line][pos.m_column] = s_state[pos.m_line][pos.m_column] != isPressed;
+          s_state[pos.m_line][pos.m_column] = isPressed;
+        }
+      }
+    }
+  } else {
+    // If we had an error, we reset the I2C bus.
+
+    // First reset the bus a few time, this somehow help.
     for (int i = 0; i < 10; ++i) {
       delete s_i2c;
       s_i2c = new I2C(p8, p9);
     }
+
+    // Actual reset.
     resetI2C();
 
 #if I2C_RESET_LOG
-    Serial.print("Reset i2c (source offset: ");
-    Serial.print(mcpErrorOffset);
-    Serial.println(")");
+    Serial.print("Reset i2c (chip index ");
+    Serial.print(mcpErrorIndex);
+    Serial.println("was in error state)");
 #endif
     //return;
   }
@@ -143,11 +156,11 @@ void Input::step() {
 bool Input::isPressed(int line, int column) {
   using namespace InputImpl;
 
-  return s_switches[line][column];
+  return s_state[line][column];
 }
 
 bool Input::hasChanged(int line, int column) {
   using namespace InputImpl;
 
-  return s_switchesChanged[line][column];
+  return s_stateChanged[line][column];
 }
