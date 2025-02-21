@@ -10,7 +10,7 @@
 
 class LayerTracker {
 public:
-  inline void delta(LayerBit i, uint8_t d) {
+  inline void delta(LayerBit i, int8_t d) {
     if (i > 0) {
       m_count[i - 1] += d;
 
@@ -27,7 +27,7 @@ public:
   }
 
 private:
-  uint8_t m_count[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+  int8_t m_count[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
   uint8_t m_mask = 0;
 };
 
@@ -98,8 +98,10 @@ void loop() {
   unsigned long perf_start = micros();
 #endif
 
+  // We refresh the input.
   Input::step();
 
+  // We add an event in the event queue for each key that have changed state.
   ON_DEBUG(bool anyNewEvent = false);
   for (int line = 0; line < NUM_LINES; ++line) {
     for (int column = 0; column < NUM_COLUMNS; ++column) {
@@ -122,40 +124,46 @@ void loop() {
   }
 #endif
 
+  // Now we are going to process the every event in the queue that we can.
   unsigned long current = micros();
   while (!s_events.isEmpty()) {
     const Event& event = s_events.peek();
 
-    // First do debouncing.
+    // First we take care of debouncing.
     {
-      if (current - event.m_time < DEBOUNCE_TIME) break;  // We have to wait a bit and pull the switches to check if we need to debounce.
+      // If the event is not old enough, we have to wait a bit and pull the switches to check if we need to debounce.
+      if (current - event.m_time < DEBOUNCE_TIME) break;
 
-      {
-        bool debounced = false;
-        for (EventQueue::Iterator it : s_events) {
-          if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME) {
-            break;
-          }
-
-          if (s_events[it].m_pos == event.m_pos && s_events[it].m_isPressed != event.m_isPressed) {
-            debugPrint("Cancel key\n");
-            s_events.popFront();
-            s_events.remove(it);
-            debounced = true;
-            break;
-          }
+      // We look at future event and see if we have an event in the queue that match this key with an opposite state withing the debouncing time frame.
+      bool debounced = false;
+      for (EventQueue::Iterator it : s_events) {
+        // We are outside the debouncing time frame, we can stop looking for events.
+        if (s_events[it].m_time - event.m_time > DEBOUNCE_TIME) {
+          break;
         }
+
+        // If the event is for the same key and with the opposite state, we have can debounce.
+        if (s_events[it].m_pos == event.m_pos && s_events[it].m_isPressed != event.m_isPressed) {
+          debugPrint("Cancel key\n");
+
+          // We remove the current event and the opposite one.
+          s_events.popFront();
+          s_events.remove(it);
+          debounced = true;
+          break;
+        }
+      }
 
 #if DEBUG_LOG
-        if (debounced) {
-          debugPrintln("Debounced a key, event queue:");
-          s_events.print("\t");
-        }
+      if (debounced) {
+        debugPrintln("Debounced a key, event queue:");
+        s_events.print("\t");
+      }
 #endif
 
-        if (debounced) continue;  // We debounced the current event, go to next.
-      }
+      if (debounced) continue;  // We debounced the current event, go to next.
     }
+
     if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed) {
       bool foundRelease = false;
       bool foundAnotherPress = false;
