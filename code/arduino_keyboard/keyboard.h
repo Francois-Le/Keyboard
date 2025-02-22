@@ -1,17 +1,6 @@
 #pragma once
 #include "stdint.h"
 
-enum ModifierKeys {
-  MOD_CTRL = 0x01,
-  MOD_SHIFT = 0x02,
-  MOD_ALT = 0x04,
-  MOD_WIN = 0x08,
-  MOD_RCTRL = 0x10,
-  MOD_RSHIFT = 0x20,
-  MOD_RALT = 0x40,
-  MOD_RWIN = 0x80,
-};
-
 enum class Key {
   NONE = 0,
 
@@ -136,53 +125,28 @@ enum class MediaKey {
   VOLUME_DOWN = 0x40,
 };
 
-class KeyboardOutput {
-public:
-  inline void add(Key k);
+/// Everything related to write the key presses to the USB bus.
+///
+/// This is a statefull system. Key presses are retained between calls to send().
+namespace KeyboardOutput {
 
-  inline void add(MediaKey k);
+/// Add the key 'k' to the set of key currently being pressed.
+void add(Key k);
 
-  void send();
+/// Add the media key 'k' to the set of key currently being pressed.
+void add(MediaKey k);
 
-  inline bool isAnyKeyPressed();
+/// Release all currently pressed keys.
+void releaseAll();
+
+/// Send a a USB packet to sent to the computer host what keys are currently being pressed.
+void send();
+
+/// Return true if any key are currently being pressed.
+bool isAnyKeyPressed();
 
 #if DEBUG_LOG
-  void print() const;
+/// Print in the debug output the list of keys currently being pressed.
+void print() const;
 #endif
-
-private:
-  uint8_t m_modifiers = 0;
-  uint8_t m_keys[6] = { 0, 0, 0, 0, 0, 0 };
-  int m_nextKey = 0;
-  uint8_t m_mediaKey = 0;
 };
-
-// BELOW IS IMPLEMENTATION OF INLINE FUNCTIONS
-
-inline void KeyboardOutput::add(Key k) {
-  switch (k) {
-    case Key::CTRL: m_modifiers = m_modifiers | MOD_CTRL; break;
-    case Key::SHIFT: m_modifiers = m_modifiers | MOD_SHIFT; break;
-    case Key::ALT: m_modifiers = m_modifiers | MOD_ALT; break;
-    case Key::WIN: m_modifiers = m_modifiers | MOD_WIN; break;
-    case Key::RCTRL: m_modifiers = m_modifiers | MOD_RCTRL; break;
-    case Key::RSHIFT: m_modifiers = m_modifiers | MOD_RSHIFT; break;
-    case Key::RALT: m_modifiers = m_modifiers | MOD_RALT; break;
-    case Key::RWIN: m_modifiers = m_modifiers | MOD_RWIN; break;
-
-    default:
-      if (m_nextKey < 6) {
-        m_keys[m_nextKey] = uint8_t(k);
-        m_nextKey++;
-      }
-      break;
-  }
-}
-
-inline void KeyboardOutput::add(MediaKey k) {
-  m_mediaKey = uint8_t(k);
-}
-
-inline bool KeyboardOutput::isAnyKeyPressed() {
-  return m_modifiers != 0 || m_nextKey != 0;
-}

@@ -36,15 +36,16 @@ uint8_t s_currentPressCount[NUM_LINES][NUM_COLUMNS];
 EventQueue s_events;
 LayerTracker s_layerTracker;
 
-inline void addK(const K& keys, KeyboardOutput& output) {
-  if (keys.m_key0 != Key::NONE) output.add(keys.m_key0);
-  if (keys.m_key1 != Key::NONE) output.add(keys.m_key1);
-  if (keys.m_mediaKey != MediaKey::NONE) output.add(keys.m_mediaKey);
+inline void addK(const K& keys) {
+  if (keys.m_key0 != Key::NONE) KeyboardOutput::add(keys.m_key0);
+  if (keys.m_key1 != Key::NONE) KeyboardOutput::add(keys.m_key1);
+  if (keys.m_mediaKey != MediaKey::NONE) KeyboardOutput::add(keys.m_mediaKey);
 }
 
 Key s_forcedKey = Key::NONE;
-void fillCurrentKeyPress(KeyboardOutput& output);
-void fillCurrentKeyPress(KeyboardOutput& output) {
+void sendCurrentKeyPress();
+void sendCurrentKeyPress() {
+  KeyboardOutput::releaseAll();
   K(*currentLayer)
   [12] = s_keyMaps[s_layerTracker.mask()];
   debugPrint("\tLayer mask: ");
@@ -54,19 +55,21 @@ void fillCurrentKeyPress(KeyboardOutput& output) {
     for (int column = 0; column < NUM_COLUMNS; ++column) {
       if (s_currentPressCount[line][column] > 0) {
         K key = currentLayer[line][column];
-        addK(key, output);
+        addK(key);
       }
     }
   }
 
-  if (!output.isAnyKeyPressed() && s_layerTracker.mask() == 1) {
-    addK(Key::SHIFT, output);
+  if (!KeyboardOutput::isAnyKeyPressed() && s_layerTracker.mask() == 1) {
+    addK(Key::SHIFT);
     debugPrintln("\tAdding shift");
   }
 
   if (s_forcedKey != Key::NONE) {
-    addK(s_forcedKey, output);
+    addK(s_forcedKey);
   }
+
+  KeyboardOutput::send();
 }
 
 
@@ -187,28 +190,12 @@ void loop() {
             debugPrintln("Press and release key");
             s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
 
-            {
-              KeyboardOutput output;
-              fillCurrentKeyPress(output);
-              output.send();
-
-              debugPrint("\tSending event: ");
-              ON_DEBUG(output.print());
-              debugPrintln();
-            }
+            sendCurrentKeyPress();
 
             s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
             delay(KEY_PRESS_LENGTH);  // milliseconds
 
-            {
-              KeyboardOutput output;
-              fillCurrentKeyPress(output);
-              output.send();
-
-              debugPrint("\tSending event: ");
-              ON_DEBUG(output.print());
-              debugPrintln();
-            }
+            sendCurrentKeyPress();
           }
           s_events.popFront();
           s_events.remove(releaseIndex);
@@ -276,13 +263,7 @@ void loop() {
     {
       debugPrintln("Send event:");
 
-      KeyboardOutput output;
-      fillCurrentKeyPress(output);
-      output.send();
-
-      debugPrint("\tSending event: ");
-      ON_DEBUG(output.print());
-      debugPrintln();
+      sendCurrentKeyPress();
     }
 
     s_events.popFront();

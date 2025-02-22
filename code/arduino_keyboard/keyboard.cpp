@@ -1,4 +1,5 @@
 #include "keyboard.h"
+#include "config.h"
 
 #include "PluggableUSBHID.h"
 #include "platform/Stream.h"
@@ -11,12 +12,23 @@ namespace KeyboardImpl {
 #define REPORT_ID_KEYBOARD 1
 #define REPORT_ID_VOLUME 3
 
+enum ModifierKeys {
+  MOD_CTRL = 0x01,
+  MOD_SHIFT = 0x02,
+  MOD_ALT = 0x04,
+  MOD_WIN = 0x08,
+  MOD_RCTRL = 0x10,
+  MOD_RSHIFT = 0x20,
+  MOD_RALT = 0x40,
+  MOD_RWIN = 0x80,
+};
+
 using namespace arduino;
 
-class Keyboard : public USBHID {
+class KeyboardHID : public USBHID {
 public:
-  Keyboard(uint16_t vendor_id = 0x1235, uint16_t product_id = 0x0050, uint16_t product_release = 0x0001);
-  virtual ~Keyboard();
+  KeyboardHID(uint16_t vendor_id = 0x1235, uint16_t product_id = 0x0050, uint16_t product_release = 0x0001);
+  virtual ~KeyboardHID();
 
   void press(uint8_t *keys, uint8_t modifiers, uint8_t mediaKey);
   void releaseAll();
@@ -30,15 +42,15 @@ private:
 };
 
 
-Keyboard::Keyboard(uint16_t vendor_id, uint16_t product_id, uint16_t product_release)
+KeyboardHID::KeyboardHID(uint16_t vendor_id, uint16_t product_id, uint16_t product_release)
   : USBHID(0, 0, vendor_id, product_id, product_release) {
 }
 
-Keyboard::~Keyboard() {
+KeyboardHID::~KeyboardHID() {
 }
 
 
-void Keyboard::press(uint8_t *keys, uint8_t modifiers, uint8_t mediaKey) {
+void KeyboardHID::press(uint8_t *keys, uint8_t modifiers, uint8_t mediaKey) {
   HID_REPORT report;
   report.data[0] = REPORT_ID_KEYBOARD;
   report.data[1] = modifiers;
@@ -58,7 +70,7 @@ void Keyboard::press(uint8_t *keys, uint8_t modifiers, uint8_t mediaKey) {
   send(&report);
 }
 
-void Keyboard::releaseAll() {
+void KeyboardHID::releaseAll() {
   HID_REPORT report;
   report.data[0] = REPORT_ID_KEYBOARD;
   report.data[1] = 0;
@@ -74,7 +86,7 @@ void Keyboard::releaseAll() {
   send(&report);
 }
 
-const uint8_t *Keyboard::report_desc() {
+const uint8_t *KeyboardHID::report_desc() {
   static const uint8_t reportDescriptor[] = {
     USAGE_PAGE(1),
     0x01,  // Generic Desktop
@@ -198,7 +210,7 @@ const uint8_t *Keyboard::report_desc() {
                                  + (1 * HID_DESCRIPTOR_LENGTH) \
                                  + (2 * ENDPOINT_DESCRIPTOR_LENGTH))
 
-const uint8_t *Keyboard::configuration_desc(uint8_t index) {
+const uint8_t *KeyboardHID::configuration_desc(uint8_t index) {
   if (index != 0) {
     return NULL;
   }
@@ -254,39 +266,88 @@ const uint8_t *Keyboard::configuration_desc(uint8_t index) {
   return _configuration_descriptor;
 }
 
-Keyboard s_keyboard;
+KeyboardHID s_keyboard;
+
+
+uint8_t s_modifiers = 0;
+uint8_t s_keys[6] = { 0, 0, 0, 0, 0, 0 };
+int s_nextKey = 0;
+uint8_t s_mediaKeys = 0;
+}
+
+void KeyboardOutput::add(Key k) {
+  using namespace KeyboardImpl;
+  switch (k) {
+    case Key::CTRL: s_modifiers = s_modifiers | MOD_CTRL; break;
+    case Key::SHIFT: s_modifiers = s_modifiers | MOD_SHIFT; break;
+    case Key::ALT: s_modifiers = s_modifiers | MOD_ALT; break;
+    case Key::WIN: s_modifiers = s_modifiers | MOD_WIN; break;
+    case Key::RCTRL: s_modifiers = s_modifiers | MOD_RCTRL; break;
+    case Key::RSHIFT: s_modifiers = s_modifiers | MOD_RSHIFT; break;
+    case Key::RALT: s_modifiers = s_modifiers | MOD_RALT; break;
+    case Key::RWIN: s_modifiers = s_modifiers | MOD_RWIN; break;
+
+    default:
+      if (s_nextKey < 6) {
+        s_keys[s_nextKey] = uint8_t(k);
+        s_nextKey++;
+      }
+      break;
+  }
+}
+
+void KeyboardOutput::add(MediaKey k) {
+  using namespace KeyboardImpl;
+  s_mediaKeys = uint8_t(k);
+}
+
+void KeyboardOutput::releaseAll() {
+  using namespace KeyboardImpl;
+  s_modifiers = 0;
+  for (uint8_t &key : s_keys) key = 0;
+  s_nextKey = 0;
+  s_mediaKeys = 0;
 }
 
 void KeyboardOutput::send() {
   using namespace KeyboardImpl;
-  s_keyboard.press(m_keys, m_modifiers, m_mediaKey);
+  s_keyboard.press(s_keys, s_modifiers, s_mediaKeys);
+
+  debugPrint("\tSending event: ");
+  ON_DEBUG(print());
+  debugPrintln();
+}
+
+bool KeyboardOutput::isAnyKeyPressed() {
+  using namespace KeyboardImpl;
+  return s_modifiers != 0 || s_nextKey != 0;
 }
 
 #if DEBUG_LOG
 void KeyboardOutput::print() const {
   debugPrint("KeyboardOutput(modifiers: ");
-  if (m_modifiers & MOD_CTRL) debugPrint("Ctrl ");
-  if (m_modifiers & MOD_SHIFT) debugPrint("Shift ");
-  if (m_modifiers & MOD_ALT) debugPrint("Alt ");
-  if (m_modifiers & MOD_WIN) debugPrint("Win ");
-  if (m_modifiers & MOD_RCTRL) debugPrint("Left_Ctrl ");
-  if (m_modifiers & MOD_RSHIFT) debugPrint("Left_Shift ");
-  if (m_modifiers & MOD_RALT) debugPrint("Left_Alt ");
-  if (m_modifiers & MOD_RWIN) debugPrint("Left_Win ");
+  if (s_modifiers & MOD_CTRL) debugPrint("Ctrl ");
+  if (s_modifiers & MOD_SHIFT) debugPrint("Shift ");
+  if (s_modifiers & MOD_ALT) debugPrint("Alt ");
+  if (s_modifiers & MOD_WIN) debugPrint("Win ");
+  if (s_modifiers & MOD_RCTRL) debugPrint("Left_Ctrl ");
+  if (s_modifiers & MOD_RSHIFT) debugPrint("Left_Shift ");
+  if (s_modifiers & MOD_RALT) debugPrint("Left_Alt ");
+  if (s_modifiers & MOD_RWIN) debugPrint("Left_Win ");
   debugPrint("keys: ");
-  debugPrint(m_keys[0]);
+  debugPrint(s_keys[0]);
   debugPrint(" ");
-  debugPrint(m_keys[1]);
+  debugPrint(s_keys[1]);
   debugPrint(" ");
-  debugPrint(m_keys[2]);
+  debugPrint(s_keys[2]);
   debugPrint(" ");
-  debugPrint(m_keys[3]);
+  debugPrint(s_keys[3]);
   debugPrint(" ");
-  debugPrint(m_keys[4]);
+  debugPrint(s_keys[4]);
   debugPrint(" ");
-  debugPrint(m_keys[5]);
+  debugPrint(s_keys[5]);
   debugPrint(" media_key: ");
-  debugPrint(m_mediaKey);
+  debugPrint(s_mediaKeys);
   debugPrint(")");
 }
 #endif
