@@ -31,26 +31,39 @@ private:
   uint8_t m_mask = 0;
 };
 
+/// The queue of input event that are yet to be processed.
+EventQueue s_events;
+
+/// For each switch on the physical keyboard, track if that switch is currently pressed.
+/// Instead of being a bool, we use a counter where "count = 0" mean the switch is not pressed and "count > 0" mean the switch is pressed. We do that so we can do some tricks where we force enable some of the switches momentarely by adding 1 without having to worry about if the switch was already pressed.
 uint8_t s_currentPressCount[NUM_LINES][NUM_COLUMNS];
 
-EventQueue s_events;
+/// Track what layer is currently active
 LayerTracker s_layerTracker;
 
+/// Additional key that is forced to be in the output even if the switch is causing that key to be held. This is reset on layer changes.
+Key s_forcedKey = Key::NONE;
+
+/// Add 'keys' to the output.
 inline void addK(const K& keys) {
   if (keys.m_key0 != Key::NONE) KeyboardOutput::add(keys.m_key0);
   if (keys.m_key1 != Key::NONE) KeyboardOutput::add(keys.m_key1);
   if (keys.m_mediaKey != MediaKey::NONE) KeyboardOutput::add(keys.m_mediaKey);
 }
 
-Key s_forcedKey = Key::NONE;
+/// Send all the key pressed to the USB bus given the current state of the keyboard.
 void sendCurrentKeyPress();
 void sendCurrentKeyPress() {
+  // Start by resetting the output.
   KeyboardOutput::releaseAll();
+
+  // Get the switch to key mapping for the current active layer.
   K(*currentLayer)
   [12] = s_keyMaps[s_layerTracker.mask()];
   debugPrint("\tLayer mask: ");
   debugPrintln(s_layerTracker.mask());
 
+  // Add the key associated to every active switch.
   for (int line = 0; line < NUM_LINES; ++line) {
     for (int column = 0; column < NUM_COLUMNS; ++column) {
       if (s_currentPressCount[line][column] > 0) {
@@ -60,15 +73,19 @@ void sendCurrentKeyPress() {
     }
   }
 
+  // Add any key that are currently forced held.
+  if (s_forcedKey != Key::NONE) {
+    addK(s_forcedKey);
+  }
+
+  // HACK: If layer 1 is enabled and no key is currently pressed, we press shift. This is because physical shift key is associated to a layer, but if we are not pressing any key on that layer we want shift to be pressed.
+  // TODO: improve this code to be more generic.
   if (!KeyboardOutput::isAnyKeyPressed() && s_layerTracker.mask() == 1) {
     addK(Key::SHIFT);
     debugPrintln("\tAdding shift");
   }
 
-  if (s_forcedKey != Key::NONE) {
-    addK(s_forcedKey);
-  }
-
+  // Send to the USB bus.
   KeyboardOutput::send();
 }
 
@@ -133,6 +150,7 @@ void loop() {
     const Event& event = s_events.peek();
 
     // First we take care of debouncing.
+    // The way we do debouncing is we wait any event to be older than DEBOUNCE_TIME before processing to check if we can cancel it.
     {
       // If the event is not old enough, we have to wait a bit and pull the switches to check if we need to debounce.
       if (current - event.m_time < DEBOUNCE_TIME) break;
@@ -164,45 +182,82 @@ void loop() {
       }
 #endif
 
-      if (debounced) continue;  // We debounced the current event, go to next.
+      // We debounced the current event, go to the next event in the main event processing loop.
+      if (debounced) continue;
     }
 
+    // We process "on release" key presses.
+    // "on release" key presses are key that trigger an output if they when they are relased if:
+    //   - They were released within MAX_HOLD_TIME of being pressed
+    //   - No other key was pressed in between.
+    // Typically this is for keys that are associated with layer changes, but output a character when being tapped.
     if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed) {
-      bool foundRelease = false;
-      bool foundAnotherPress = false;
-      EventQueue::Iterator releaseIndex;
-      for (EventQueue::Iterator it : s_events) {
-        if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed) {
-          foundRelease = true;
-          releaseIndex = it;
-          break;
-        }
+      // We have a key press for a "on release" key.
 
-        if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed) {
-          foundAnotherPress = true;
-          break;
-        }
-      }
+      EventQueue::Iterator nextIt = s_events.next(s_events.begin());
+      if (nextIt != s_events.end()) {
+        const Event& nextEvent = s_events.peek();
+        if (nextEvent.m_pos == event.m_pos && !nextEvent.m_isPressed && nextEvent.m_time - event.m_time < MAX_HOLD_TIME) {
+          // The next event is releasing the same key within the MAX_HOLD_TIME, we output a key press.
+          debugPrintln("Press and release key");
 
-      if (!foundAnotherPress) {
-        if (foundRelease) {
-          if (s_events[releaseIndex].m_time - event.m_time < MAX_HOLD_TIME) {
-            debugPrintln("Press and release key");
-            s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
+          s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
+          sendCurrentKeyPress();
 
-            sendCurrentKeyPress();
+          delay(KEY_PRESS_LENGTH);  // milliseconds
 
-            s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
-            delay(KEY_PRESS_LENGTH);  // milliseconds
+          s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
+          sendCurrentKeyPress();
 
-            sendCurrentKeyPress();
-          }
+          // Remove the release event from the queue and go the the next event in the main event processing loop.
           s_events.popFront();
-          s_events.remove(releaseIndex);
+          s_events.popFront();
+          continue;
+        } else {
+          //The next event is unrelated to the "on release" key behavior, we can continue processing the current event.
         }
-
+      } else {
+        // We need to see the next event to understand how to interpret this key event. Break the event processing loop to pull for events.
         break;
       }
+
+      // TODO: Old behavior, remove.
+      //// We try to find if we can find an event for the "on release" key (and its location in the queue) and if we have any other key press in between.
+      //bool foundRelease = false;
+      //EventQueue::Iterator releaseIndex;
+      //bool foundAnotherPress = false;
+      //for (EventQueue::Iterator it : s_events) {
+      //  if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed) {
+      //    foundRelease = true;
+      //    releaseIndex = it;
+      //    break;
+      //  }
+      //
+      //  if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed) {
+      //    foundAnotherPress = true;
+      //    break;
+      //  }
+      //}
+      //
+      //if (!foundAnotherPress) {
+      //  if (foundRelease) {
+      //    if (s_events[releaseIndex].m_time - event.m_time < MAX_HOLD_TIME) {
+      //      debugPrintln("Press and release key");
+      //
+      //      s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
+      //      sendCurrentKeyPress();
+      //
+      //      delay(KEY_PRESS_LENGTH);  // milliseconds
+      //
+      //      s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
+      //      sendCurrentKeyPress();
+      //    }
+      //    s_events.popFront();
+      //    s_events.remove(releaseIndex);
+      //  }
+      //
+      //  break;
+      //}
     }
 
 #if DEBUG_LOG
@@ -213,7 +268,7 @@ void loop() {
     debugPrintln();
 #endif
 
-    // Update the press count of each button.
+    // Update the press count for that key.
     uint8_t& pressCount = s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column];
     if (event.m_isPressed) {
       pressCount++;
@@ -221,7 +276,7 @@ void loop() {
       if (pressCount > 0) pressCount--;
     }
 
-    // Update forced key.
+    // If this key has a "forced key" associated wit it, we grab it.
     {
       K(*currentLayer)
       [12] = s_keyMaps[s_layerTracker.mask()];
@@ -239,11 +294,12 @@ void loop() {
       // Reset button presses when layer change.
       for (int line = 0; line < NUM_LINES; ++line) {
         for (int column = 0; column < NUM_COLUMNS; ++column) {
-          if (immuneToReset[line][column]) continue;
+          if (immuneToReset[line][column]) continue;  // Except key that are immune to reset.
           s_currentPressCount[line][column] = 0;
         }
       }
 
+      // Reset the forced key.
       s_forcedKey = Key::NONE;
     }
 
@@ -259,12 +315,10 @@ void loop() {
     }
 #endif
 
-    // Send an event.
-    {
-      debugPrintln("Send event:");
+    // Output the current state of key pressed to the USB host.
+    debugPrintln("Send event:");
+    sendCurrentKeyPress();
 
-      sendCurrentKeyPress();
-    }
 
     s_events.popFront();
   }
