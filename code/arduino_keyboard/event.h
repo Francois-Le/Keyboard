@@ -62,6 +62,9 @@ public:
   /// Access an event in the queue with an iterator.
   inline const Event& operator[](Iterator it) const;
 
+  /// Access an event in the queue with an iterator.
+  inline Event& operator[](Iterator it);
+
   /// Remove the event at the iterator index in the queue. This does not need to be the first event in the queue. The events in the queue are not re-ordered.
   inline void remove(Iterator it);
 
@@ -148,6 +151,10 @@ inline EventQueue::Iterator EventQueue::end() const {
 }
 
 inline const Event& EventQueue::operator[](Iterator it) const {
+  return m_events[it.m_index].m_item;
+}
+
+inline Event& EventQueue::operator[](Iterator it) {
   return m_events[it.m_index].m_item;
 }
 
