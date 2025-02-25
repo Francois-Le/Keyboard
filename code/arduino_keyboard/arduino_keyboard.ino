@@ -150,6 +150,7 @@ void loop() {
     const Event& event = s_events.peek();
 
     // Overlap removal.
+    // We do overlap removal before debouncing so that if a bounce happnened at the same time of another key press/release, then we swap thing in the queue that make the bounce event successive in the event queue.
     {
       // If the event is not old enough, we have to wait before we can evalulate if there are any overlap removal to be done
       if (current - event.m_time < OVERLAP_REMOVAL_TIME) break;
