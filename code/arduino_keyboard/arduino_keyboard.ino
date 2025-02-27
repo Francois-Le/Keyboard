@@ -281,7 +281,7 @@ void loop() {
 
 #if DEBUG_LOG
     debugPrint("processing event ");
-    debugPrint(s_events.begin());
+    debugPrint(s_events.begin().m_index);
     debugPrint(" ");
     event.print();
     debugPrintln();

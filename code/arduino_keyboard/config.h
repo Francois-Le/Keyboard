@@ -32,6 +32,7 @@
 #define KEY_PRESS_LENGTH 50 // milli-seconds
 
 #if ANY_LOG
+#include <Arduino.h>
 #define debugPrint(x) Serial.print(x)
 #define debugPrintln(x) Serial.println(x)
 #define ON_DEBUG(x) x

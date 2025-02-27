@@ -1,4 +1,5 @@
 #pragma once
+#include "config.h"
 #include "stdint.h"
 
 enum class Key {
@@ -147,6 +148,6 @@ bool isAnyKeyPressed();
 
 #if DEBUG_LOG
 /// Print in the debug output the list of keys currently being pressed.
-void print() const;
+void print();
 #endif
 };

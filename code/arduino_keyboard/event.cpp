@@ -13,11 +13,11 @@ void Event::print() const {
   debugPrint(")");
 }
 
-void EventCircularBuffer::print(const char* prefix) {
-  for (uint8_t it = begin(); it != end(); ++it) {
-    const Item& item = m_events[it];
+void EventQueue::print(const char* prefix) {
+  for (Iterator it = begin(); it != end(); ++it) {
+    const Item& item = m_events[it.m_index];
     debugPrint(prefix);
-    debugPrint(it);
+    debugPrint(it.m_index);
     debugPrint(" ");
     if (item.m_deleted) debugPrint("DELETED");
     item.m_item.print();

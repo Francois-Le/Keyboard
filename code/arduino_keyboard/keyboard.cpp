@@ -1,5 +1,4 @@
 #include "keyboard.h"
-#include "config.h"
 
 #include "PluggableUSBHID.h"
 #include "platform/Stream.h"
@@ -324,7 +323,8 @@ bool KeyboardOutput::isAnyKeyPressed() {
 }
 
 #if DEBUG_LOG
-void KeyboardOutput::print() const {
+void KeyboardOutput::print() {
+  using namespace KeyboardImpl;
   debugPrint("KeyboardOutput(modifiers: ");
   if (s_modifiers & MOD_CTRL) debugPrint("Ctrl ");
   if (s_modifiers & MOD_SHIFT) debugPrint("Shift ");
