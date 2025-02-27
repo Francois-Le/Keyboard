@@ -23,7 +23,7 @@
 #define DEBOUNCE_TIME 10000 // micro-seconds
 
 // Any combinaison of key that are simultaneously held for less than this amount of time will be ignored.
-#define OVERLAP_REMOVAL_TIME 250000 // micro-seconds
+#define OVERLAP_REMOVAL_TIME 100000 // micro-seconds
 
 // For "on release" keys (i.e., for key that are both used as layer and standard key), this is the maximum hold time for the key to be considered a standard press rather than a layer selection.
 #define MAX_HOLD_TIME 500000 // micro-seconds

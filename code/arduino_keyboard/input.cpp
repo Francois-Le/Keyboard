@@ -51,9 +51,9 @@ static MCP23008 s_mcps[] = {
   MCP23008(0),
   MCP23008(1),
   MCP23008(2),
-  MCP23008(3),
   MCP23008(4),
   MCP23008(5),
+  MCP23008(6),
 #endif
 };
 
@@ -147,7 +147,7 @@ void Input::step() {
 #if I2C_RESET_LOG
     Serial.print("Reset i2c (chip index ");
     Serial.print(mcpErrorIndex);
-    Serial.println("was in error state)");
+    Serial.println(" was in error state)");
 #endif
     //return;
   }

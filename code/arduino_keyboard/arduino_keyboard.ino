@@ -149,24 +149,29 @@ void loop() {
   while (!s_events.isEmpty()) {
     const Event& event = s_events.peek();
 
-    // Overlap removal.
-    // We do overlap removal before debouncing so that if a bounce happnened at the same time of another key press/release, then we swap thing in the queue that make the bounce event successive in the event queue.
-    {
-      // If the event is not old enough, we have to wait before we can evalulate if there are any overlap removal to be done
-      if (current - event.m_time < OVERLAP_REMOVAL_TIME) break;
-
-      // We look at the next event. If if the current event is a key press, the next event is a key release, and the time between them is lower than OVERLAP_REMOVAL_TIME, then we swap them in the event queue.
-      EventQueue::Iterator nextIt = s_events.next(s_events.begin());
-      if (nextIt != s_events.end()) {
-        const Event& nextEvent = s_events[nextIt];
-
-        if (nextEvent.m_time - event.m_time < OVERLAP_REMOVAL_TIME && event.m_isPressed && !nextEvent.m_isPressed) {
-          Event currEventCopy = event;
-          s_events[s_events.begin()] = nextEvent;
-          s_events[nextIt] = currEventCopy;
-        }
-      }
-    }
+    //// Overlap removal.
+    //// We do overlap removal before debouncing so that if a bounce happened at the same time of another key press/release, then we swap thing in the queue that make the bounce event successive in the event queue.
+    //{
+    //  // If the event is not old enough, we have to wait before we can evalulate if there are any overlap removal to be done
+    //  if (current - event.m_time < OVERLAP_REMOVAL_TIME) break;
+    //
+    //  // We look at the next event. We swap the two event if the following conditions are met:
+    //  //  - The current event is a key press
+    //  //  - The next event is a key release
+    //  //  - The two event are for different keys (otherwise we will swap ordinary key taps).
+    //  //  - The time between them is lower than OVERLAP_REMOVAL_TIME
+    //  EventQueue::Iterator nextIt = s_events.next(s_events.begin());
+    //  if (nextIt != s_events.end()) {
+    //    const Event& nextEvent = s_events[nextIt];
+    //
+    //    if (nextEvent.m_time - event.m_time < OVERLAP_REMOVAL_TIME && event.m_isPressed && !nextEvent.m_isPressed && event.m_pos != nextEvent.m_pos) {
+    //      debugPrint("Swap events to remove overlap\n");
+    //      Event currEventCopy = event;
+    //      s_events[s_events.begin()] = nextEvent;
+    //      s_events[nextIt] = currEventCopy;
+    //    }
+    //  }
+    //}
 
     // Debouncing.
     // The way we do debouncing is we wait any event to be older than DEBOUNCE_TIME before processing to check if we can cancel it.
