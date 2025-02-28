@@ -213,75 +213,55 @@ void loop() {
     // We process "on release" key presses.
     // "on release" key presses are key that trigger an output if they when they are relased if:
     //   - They were released within MAX_HOLD_TIME of being pressed
-    //   - No other key was pressed in between.
+    //   - No other key was pressed in between, but other key release are acceptable.
     // Typically this is for keys that are associated with layer changes, but output a character when being tapped.
     if (onRelease[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed) {
       // We have a key press for a "on release" key.
 
-      EventQueue::Iterator nextIt = s_events.next(s_events.begin());
-      if (nextIt != s_events.end()) {
-        const Event& nextEvent = s_events.peek();
-        if (nextEvent.m_pos == event.m_pos && !nextEvent.m_isPressed && nextEvent.m_time - event.m_time < MAX_HOLD_TIME) {
-          // The next event is releasing the same key within the MAX_HOLD_TIME, we output a key press.
-          debugPrintln("Press and release key");
-
-          s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
-          sendCurrentKeyPress();
-
-          delay(KEY_PRESS_LENGTH);  // milliseconds
-
-          s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
-          sendCurrentKeyPress();
-
-          // Remove the release event from the queue and go the the next event in the main event processing loop.
-          s_events.popFront();
-          s_events.popFront();
-          continue;
-        } else {
-          //The next event is unrelated to the "on release" key behavior, we can continue processing the current event.
+      // Look up if we can find the event for releasing the current key.
+      bool foundRelease = false;
+      EventQueue::Iterator releaseIndex;
+      // And look if we pressed another key.
+      bool foundAnotherPress = false;
+      for (EventQueue::Iterator it = s_events.next(s_events.begin()); it != s_events.end(); ++it) {
+        if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed) {
+          foundRelease = true;
+          releaseIndex = it;
+          break;
         }
-      } else {
-        // We need to see the next event to understand how to interpret this key event. Break the event processing loop to pull for events.
-        break;
+
+        if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed) {
+          foundAnotherPress = true;
+          break;
+        }
       }
 
-      // TODO: Old behavior, remove.
-      //// We try to find if we can find an event for the "on release" key (and its location in the queue) and if we have any other key press in between.
-      //bool foundRelease = false;
-      //EventQueue::Iterator releaseIndex;
-      //bool foundAnotherPress = false;
-      //for (EventQueue::Iterator it : s_events) {
-      //  if (s_events[it].m_pos == event.m_pos && !s_events[it].m_isPressed) {
-      //    foundRelease = true;
-      //    releaseIndex = it;
-      //    break;
-      //  }
-      //
-      //  if (s_events[it].m_pos != event.m_pos && s_events[it].m_isPressed) {
-      //    foundAnotherPress = true;
-      //    break;
-      //  }
-      //}
-      //
-      //if (!foundAnotherPress) {
-      //  if (foundRelease) {
-      //    if (s_events[releaseIndex].m_time - event.m_time < MAX_HOLD_TIME) {
-      //      debugPrintln("Press and release key");
-      //
-      //      s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
-      //      sendCurrentKeyPress();
-      //
-      //      delay(KEY_PRESS_LENGTH);  // milliseconds
-      //
-      //      s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
-      //      sendCurrentKeyPress();
-      //    }
-      //    s_events.popFront();
-      //    s_events.remove(releaseIndex);
-      //  }
-      //
-      //  break;
-      //}
+      if (!foundAnotherPress) {
+        if (foundRelease) {
+          // We found the release event, and there was no press in between. If the two events are within the MAX_HOLD_TIME, we execute the "on release" behavior
+          if (s_events[releaseIndex].m_time - event.m_time < MAX_HOLD_TIME) {
+            debugPrintln("Press and release key");
+
+            s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
+            sendCurrentKeyPress();
+
+            delay(KEY_PRESS_LENGTH);  // milliseconds
+
+            s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
+            sendCurrentKeyPress();
+          }
+
+          // Remove the two events from the queue and go to the next event.
+          s_events.popFront();
+          s_events.remove(releaseIndex);
+          continue;
+        } else {
+          // We have not found any other key press and we don't have found the release event, we don't know what to do yet, pull for more events.
+          break;
+        }
+      } else {
+        // Another key was pressed before we released the current one. We don't execute the "on release" behavior, continue execution normally.
+      }
     }
 
 #if DEBUG_LOG
