@@ -53,7 +53,7 @@ K accentLayer[5][12] =
   {K(), K(),                    K(),        K(),                    K(),                    K(),                   /**/ K(),                    K(),                    K(),                    K(),                    K(),                   K(),},
   {K(), K(Key::D0),             K(Key::D2), K(Key::D7),             K(Key::RALT, Key::D6),  K(Key::D4),            /**/ K(Key::SHIFT, Key::N3), K(Key::NUM_7),          K(Key::NUM_8),          K(Key::NUM_9),          K(Key::NUM_MINUS),     K(),},
   {K(), K(Key::RALT, Key::D0),  K(Key::P2), K(Key::RALT, Key::E),   K(Key::D1),             K(Key::D3),            /**/ K(Key::M2),             K(Key::NUM_4),          K(Key::NUM_5),          K(Key::NUM_6),          K(Key::NUM_PLUS),      K(),},
-  {K(), K(),                    K(),        K(Key::D9),             K(Key::RALT, Key::D3),  K(Key::D8),            /**/ K(Key::BACKSPACE),      K(Key::NUM_1),          K(Key::NUM_2),          K(Key::NUM_3),          K(Key::D02),           K(),},
+  {K(), K(),                    K(Key::D8), K(Key::D9),             K(Key::RALT, Key::D3),  K(Key::SPACE),         /**/ K(Key::BACKSPACE),      K(Key::NUM_1),          K(Key::NUM_2),          K(Key::NUM_3),          K(Key::D02),           K(),},
   {K(), K(Key::WIN),            K(),        K(Key::CTRL),           K(Key::SHIFT),          K(),                   /**/ K(Key::ENTER),          K(Key::NUM_0),          K(Key::SHIFT, Key::N2), K(),                    K(),                   K(),},
 };  
 
