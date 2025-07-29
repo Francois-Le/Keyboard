@@ -59,11 +59,11 @@ K accentLayer[5][12] =
 
  K accentLayer2[5][12] =
 {
-  {K(), K(), K(), K(), K(), K(),                    /**/ K(),                   K(),                    K(),         K(),                    K(),                    K(),},
-  {K(), K(), K(), K(), K(), K(Key::RALT, Key::D7),  /**/ K(Key::RALT, Key::D8), K(Key::RALT, Key::D02), K(Key::D01), K(Key::RALT, Key::D01), K(Key::SHIFT, Key::W1), K(),},
-  {K(), K(), K(), K(), K(), K(Key::P1),             /**/ K(Key::RALT, Key::D2), K(Key::RALT, Key::D4),  K(Key::D5),  K(Key::RALT, Key::D5),  K(Key::W1),             K(),},
-  {K(), K(), K(), K(), K(), K(Key::SHIFT, Key::M1), /**/ K(),                   K(),                    K(),         K(),                    K(),                    K(),},
-  {K(), K(), K(), K(), K(), K(),                    /**/ K(),                   K(),                    K(),         K(),                    K(),                    K(),},
+  {K(), K(),                         K(), K(), K(), K(),                    /**/ K(),                   K(),                    K(),         K(),                    K(),                    K(),},
+  {K(), K(MediaKey::NEXT_TRACK),     K(), K(), K(), K(Key::RALT, Key::D7),  /**/ K(Key::RALT, Key::D8), K(Key::RALT, Key::D02), K(Key::D01), K(Key::RALT, Key::D01), K(Key::SHIFT, Key::W1), K(),},
+  {K(), K(MediaKey::PLAY_PAUSE),     K(), K(), K(), K(Key::P1),             /**/ K(Key::RALT, Key::D2), K(Key::RALT, Key::D4),  K(Key::D5),  K(Key::RALT, Key::D5),  K(Key::W1),             K(),},
+  {K(), K(MediaKey::PREVIOUS_TRACK), K(), K(), K(), K(Key::SHIFT, Key::M1), /**/ K(),                   K(),                    K(),         K(),                    K(),                    K(),},
+  {K(), K(),                         K(), K(), K(), K(),                    /**/ K(),                   K(),                    K(),         K(),                    K(),                    K(),},
 };
 
 bool immuneToReset[5][12] =

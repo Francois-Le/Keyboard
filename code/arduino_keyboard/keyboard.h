@@ -122,6 +122,11 @@ enum class Key {
 enum class MediaKey {
   NONE = 0,
 
+  NEXT_TRACK = 0x01,
+  PREVIOUS_TRACK = 0x02,
+  STOP = 0x04,
+  PLAY_PAUSE = 0x08,
+  MUTE = 0x10,
   VOLUME_UP = 0x20,
   VOLUME_DOWN = 0x40,
 };
