@@ -84,6 +84,15 @@ bool onRelease[5][12] =
   {false, false, false, false, false, true,  /**/ true,  false, false, false, false, false},
 };
 
+bool noOverlapRemoval[5][12] =
+{
+  {false, false, false, false, false, false, /**/ false, false, false, false, false, false},
+  {false, false, false, false, false, false, /**/ false, false, false, false, false, false},
+  {false, false, false, false, false, false, /**/ false, false, false, false, false, false},
+  {false, false, false, false, false, false, /**/ false, false, false, false, false, false},
+  {false, false, false, true,  true,  true,  /**/ true,   true, true,  false, false, false},
+};
+
 enum LayerBit : uint8_t
 {
   LAYER_NONE = 0,

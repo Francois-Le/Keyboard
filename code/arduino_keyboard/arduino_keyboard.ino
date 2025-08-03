@@ -158,13 +158,19 @@ void loop() {
     //  // We look at the next event. We swap the two event if the following conditions are met:
     //  //  - The current event is a key press
     //  //  - The next event is a key release
+    //  //  - None of the key is blocked for overlap removal
     //  //  - The two event are for different keys (otherwise we will swap ordinary key taps).
     //  //  - The time between them is lower than OVERLAP_REMOVAL_TIME
     //  EventQueue::Iterator nextIt = s_events.next(s_events.begin());
     //  if (nextIt != s_events.end()) {
     //    const Event& nextEvent = s_events[nextIt];
     //
-    //    if (nextEvent.m_time - event.m_time < OVERLAP_REMOVAL_TIME && event.m_isPressed && !nextEvent.m_isPressed && event.m_pos != nextEvent.m_pos) {
+    //    if (!noOverlapRemoval[event.m_pos.m_line][event.m_pos.m_column] && 
+    //        !noOverlapRemoval[nextEvent.m_pos.m_line][nextEvent.m_pos.m_column] &&
+    //        nextEvent.m_time - event.m_time < OVERLAP_REMOVAL_TIME &&
+    //        event.m_isPressed && 
+    //        !nextEvent.m_isPressed && 
+    //        event.m_pos != nextEvent.m_pos) {
     //      debugPrint("Swap events to remove overlap\n");
     //      Event currEventCopy = event;
     //      s_events[s_events.begin()] = nextEvent;
