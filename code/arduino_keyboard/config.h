@@ -22,8 +22,12 @@
 // Sequence of press-release or release-press under this time are ignored. Very short presses can be caused by the mecanical switch "bouncing", causing erroneous presses
 #define DEBOUNCE_TIME 10000 // micro-seconds
 
-// Any combinaison of key that are simultaneously held for less than this amount of time will be ignored.
-#define OVERLAP_REMOVAL_TIME 100000 // micro-seconds
+// If enabled, a "tap or layer" key (such as space) that is released slightly too late after the next key was pressed is treated as a tap instead of activating its layer. This fixes typing " a" and getting " à". See overlap.h.
+#define OVERLAP_REMOVAL 1
+
+// Maximum delay between another key being pressed and the release of a "tap or layer" key for that overlap to be considered accidental rather than a deliberate use of the layer.
+// This is also the worst case latency added when deliberately using such a layer, so it should stay small.
+#define OVERLAP_REMOVAL_TIME 30000 // micro-seconds
 
 // For "on release" keys (i.e., for key that are both used as layer and standard key), this is the maximum hold time for the key to be considered a standard press rather than a layer selection.
 #define MAX_HOLD_TIME 500000 // micro-seconds

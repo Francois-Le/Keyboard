@@ -5,6 +5,7 @@
 #include "Keyboard.h"
 #include "KeyConfig.h"
 #include "event.h"
+#include "overlap.h"
 
 
 
@@ -149,36 +150,6 @@ void loop() {
   while (!s_events.isEmpty()) {
     const Event& event = s_events.peek();
 
-    //// Overlap removal.
-    //// We do overlap removal before debouncing so that if a bounce happened at the same time of another key press/release, then we swap thing in the queue that make the bounce event successive in the event queue.
-    //{
-    //  // If the event is not old enough, we have to wait before we can evalulate if there are any overlap removal to be done
-    //  if (current - event.m_time < OVERLAP_REMOVAL_TIME) break;
-    //
-    //  // We look at the next event. We swap the two event if the following conditions are met:
-    //  //  - The current event is a key press
-    //  //  - The next event is a key release
-    //  //  - None of the key is blocked for overlap removal
-    //  //  - The two event are for different keys (otherwise we will swap ordinary key taps).
-    //  //  - The time between them is lower than OVERLAP_REMOVAL_TIME
-    //  EventQueue::Iterator nextIt = s_events.next(s_events.begin());
-    //  if (nextIt != s_events.end()) {
-    //    const Event& nextEvent = s_events[nextIt];
-    //
-    //    if (!noOverlapRemoval[event.m_pos.m_line][event.m_pos.m_column] && 
-    //        !noOverlapRemoval[nextEvent.m_pos.m_line][nextEvent.m_pos.m_column] &&
-    //        nextEvent.m_time - event.m_time < OVERLAP_REMOVAL_TIME &&
-    //        event.m_isPressed && 
-    //        !nextEvent.m_isPressed && 
-    //        event.m_pos != nextEvent.m_pos) {
-    //      debugPrint("Swap events to remove overlap\n");
-    //      Event currEventCopy = event;
-    //      s_events[s_events.begin()] = nextEvent;
-    //      s_events[nextIt] = currEventCopy;
-    //    }
-    //  }
-    //}
-
     // Debouncing.
     // The way we do debouncing is we wait any event to be older than DEBOUNCE_TIME before processing to check if we can cancel it.
     {
@@ -215,6 +186,63 @@ void loop() {
       // We debounced the current event, go to the next event in the main event processing loop.
       if (debounced) continue;
     }
+
+    // Overlap removal.
+    // We do this after debouncing so that the decision is taken on real events rather than on switch bounces, and before the "on release" handling since we are correcting a case that it gets wrong.
+#if OVERLAP_REMOVAL
+    if (overlapRemoval[event.m_pos.m_line][event.m_pos.m_column] && event.m_isPressed) {
+      // Scan the queue after the current press, looking for its release and counting how many other keys were pressed in the meantime.
+      OverlapScan scan;
+      for (EventQueue::Iterator it = s_events.next(s_events.begin()); it != s_events.end(); ++it) {
+        const Event& other = s_events[it];
+
+        if (other.m_pos == event.m_pos) {
+          if (!other.m_isPressed) {
+            scan.m_foundRelease = true;
+            scan.m_releaseTime = other.m_time;
+            scan.m_releaseIt = it;
+            break;
+          }
+          continue;
+        }
+
+        if (other.m_isPressed) {
+          if (scan.m_interveningPressCount == 0) scan.m_firstInterveningPressTime = other.m_time;
+          // Saturate so that a long chord cannot wrap the counter back to an accepted value.
+          if (scan.m_interveningPressCount < 255) scan.m_interveningPressCount++;
+        }
+      }
+
+      const OverlapAction action = evaluateOverlap(event, scan, current);
+
+      // We can't tell yet whether this is a tap or a layer hold, poll for more events.
+      if (action == OverlapAction::WAIT) break;
+
+      if (action == OverlapAction::EMIT_TAP) {
+        debugPrintln("Overlap removal: emit tap");
+
+        // Emit the tap without ever activating the layer, so the key that was pressed in between is
+        // resolved on the current layer rather than on the one this key would have selected.
+        s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
+        sendCurrentKeyPress();
+
+        delay(KEY_PRESS_LENGTH);  // milliseconds
+
+        s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
+        sendCurrentKeyPress();
+
+        // Drop this key's press and release, leaving every other event untouched.
+        s_events.popFront();
+        s_events.remove(scan.m_releaseIt);
+
+#if DEBUG_LOG
+        debugPrintln("Removed an overlap, event queue:");
+        s_events.print("\t");
+#endif
+        continue;
+      }
+    }
+#endif
 
     // We process "on release" key presses.
     // "on release" key presses are key that trigger an output if they when they are relased if:

@@ -84,13 +84,16 @@ bool onRelease[5][12] =
   {false, false, false, false, false, true,  /**/ true,  false, false, false, false, false},
 };
 
-bool noOverlapRemoval[5][12] =
+// "Tap or layer" keys for which a late release should be corrected into a tap. See overlap.h.
+// Only keys that are both in 'onRelease' and in 's_layerKeys' are meaningful here.
+// Enter (4,6) has the same latent problem and can be enabled by flipping its entry.
+bool overlapRemoval[5][12] =
 {
   {false, false, false, false, false, false, /**/ false, false, false, false, false, false},
   {false, false, false, false, false, false, /**/ false, false, false, false, false, false},
   {false, false, false, false, false, false, /**/ false, false, false, false, false, false},
   {false, false, false, false, false, false, /**/ false, false, false, false, false, false},
-  {false, false, false, true,  true,  true,  /**/ true,   true, true,  false, false, false},
+  {false, false, false, false, false, true,  /**/ false, false, false, false, false, false},
 };
 
 enum LayerBit : uint8_t
