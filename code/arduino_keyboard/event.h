@@ -14,6 +14,8 @@ struct Event {
   /// Timestamp of this event in micro-seconds
   unsigned long m_time;
 
+  uint32_t m_id;
+
 #if DEBUG_LOG
   /// print the content of this event in the debug output.
   void print() const;

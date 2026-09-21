@@ -1,5 +1,10 @@
 #pragma once
 
+// Binary Web Serial telemetry. Disable to use the legacy text logs instead.
+#ifndef REMOTE_TRACE
+#define REMOTE_TRACE 1
+#endif
+
 // Configuration dor logs, if any of the following setting is enabled the program will initialize the serial output.
 
 // If enabled, the program will write in the debug output the state of the event buffer and how it was processed.
@@ -10,6 +15,10 @@
 #define PERF_LOG 0
 
 #define ANY_LOG DEBUG_LOG || I2C_RESET_LOG || PERF_LOG
+
+#if REMOTE_TRACE && (ANY_LOG)
+#error "REMOTE_TRACE and text serial logs cannot share the CDC stream"
+#endif
 
 
 // Version of the board, define what MCPs are available.

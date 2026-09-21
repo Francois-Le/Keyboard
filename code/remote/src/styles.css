@@ -1,0 +1,168 @@
+:root {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --panel: #161b22;
+  --panel2: #1f2937;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --border: #30363d;
+  --input: #2f81f7;
+  --internal: #a371f7;
+  --output: #3fb950;
+  --warn: #d29922;
+  --error: #f85149;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at 20% 0%, #1b2a4a 0, transparent 35%), var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+header {
+  padding: 22px 28px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(13, 17, 23, 0.9);
+}
+
+h1 { margin: 0 0 6px; font-size: 24px; }
+.subtitle { margin: 0; color: var(--muted); max-width: 1100px; }
+
+.toolbar, .filters, .stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.toolbar { padding: 14px 28px; background: rgba(22, 27, 34, 0.8); border-bottom: 1px solid var(--border); }
+.filters { padding: 0 28px 14px; background: rgba(22, 27, 34, 0.8); border-bottom: 1px solid var(--border); }
+.stats { padding: 10px 28px; color: var(--muted); border-bottom: 1px solid var(--border); gap: 22px; }
+
+button, .fileButton {
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+button:hover, .fileButton:hover { border-color: #58a6ff; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.fileButton.disabled { opacity: 0.5; pointer-events: none; }
+input[type="file"] { display: none; }
+label { color: var(--muted); }
+
+.status {
+  flex: 1 1 360px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+.status.ok { border-color: var(--output); }
+.status.busy { border-color: var(--input); }
+.status.error { border-color: var(--error); color: #ffd7d5; }
+
+main {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(320px, 420px);
+  gap: 18px;
+  padding: 18px 28px 28px;
+  height: calc(100vh - 215px);
+  min-height: 520px;
+}
+
+.timeline {
+  overflow: auto;
+  padding: 18px 18px 70px 38px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(13, 17, 23, 0.72);
+  position: relative;
+}
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 24px;
+  top: 20px;
+  bottom: 20px;
+  width: 2px;
+  background: linear-gradient(var(--border), #58a6ff44, var(--border));
+}
+
+.event {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  width: 100%;
+  text-align: left;
+  position: relative;
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.event::before {
+  content: "";
+  position: absolute;
+  left: -21px;
+  top: 20px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 4px var(--bg);
+}
+.event.input { color: var(--input); }
+.event.internal { color: var(--internal); }
+.event.output { color: var(--output); }
+.event.warn, .event.checkpoint { border-color: var(--warn); }
+.event.error { border-color: var(--error); }
+.event.selected { outline: 2px solid #58a6ff; }
+
+.lane {
+  align-self: start;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.eventMain { display: grid; gap: 3px; color: var(--text); }
+.eventMain small { color: var(--muted); }
+.compressedGap {
+  grid-column: 1 / -1;
+  margin-bottom: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--warn);
+  background: #d2992216;
+  font-size: 12px;
+  width: fit-content;
+}
+
+.sidePanel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sidePanel h2 { margin: 0; }
+pre {
+  flex: 1;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+}
+.empty { color: var(--muted); padding: 28px; text-align: center; }
+.sensitivity { color: #ffd8a8; }
+
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; height: auto; }
+  .timeline, pre { min-height: 420px; }
+}

@@ -1,4 +1,5 @@
 #include "keyboard.h"
+#include "trace.h"
 
 #include "PluggableUSBHID.h"
 #include "platform/Stream.h"
@@ -61,12 +62,16 @@ void KeyboardHID::press(uint8_t *keys, uint8_t modifiers, uint8_t mediaKey) {
   report.data[7] = keys[4];
   report.data[8] = keys[5];
   report.length = 9;
-  send(&report);
+  uint32_t start = micros();
+  bool sent = send(&report);
+  Trace::hid(report.data, report.length, sent, uint32_t(micros() - start));
 
   report.data[0] = REPORT_ID_VOLUME;
   report.data[1] = mediaKey;
   report.length = 2;
-  send(&report);
+  start = micros();
+  sent = send(&report);
+  Trace::hid(report.data, report.length, sent, uint32_t(micros() - start));
 }
 
 void KeyboardHID::releaseAll() {
@@ -82,7 +87,9 @@ void KeyboardHID::releaseAll() {
   report.data[8] = 0;
   report.length = 9;
 
-  send(&report);
+  const uint32_t start = micros();
+  const bool sent = send(&report);
+  Trace::hid(report.data, report.length, sent, uint32_t(micros() - start));
 }
 
 const uint8_t *KeyboardHID::report_desc() {
