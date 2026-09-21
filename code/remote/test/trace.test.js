@@ -14,11 +14,11 @@ function frame(type, seq, micros, fill = () => {}) {
   return bytes;
 }
 
-function hello(seq = 1) {
-  return frame(1, seq, 1000, p => {
+function hello(seq = 1, layerCount = 0, streamId = 99, time = 1000) {
+  return frame(1, seq, time, p => {
     p.setUint8(0, 7); p.setUint8(1, 3); p.setUint8(2, 4); p.setUint8(3, 1);
     p.setUint32(4, 5000, true); p.setUint32(8, 30000, true); p.setUint32(12, 200000, true);
-    p.setUint32(16, 120, true); p.setUint32(20, 99, true);
+    p.setUint32(16, 120, true); p.setUint32(20, streamId, true); p.setUint16(24, layerCount, true);
   });
 }
 
@@ -107,6 +107,8 @@ test('complete snapshot atomically establishes queue and hides entries', () => {
   assert.deepEqual(model.queue.map(q => q.id), [11, 12]);
   assert.equal(model.events.some(e => e.typeName === 'SNAPSHOT_ENTRY'), false);
   assert.equal(model.events.at(-1).title, 'Queue checkpoint');
+  assert.equal(model.events[0].kind, 'CHECKPOINT');
+  assert.equal(model.events.at(-1).kind, 'CHECKPOINT');
   assert.equal(model.events.at(-1).queueAfter.length, 2);
 });
 
@@ -148,6 +150,7 @@ test('sequence gap invalidates queue until checkpoint', () => {
   }
   assert.equal(model.queueKnown, false);
   assert.equal(model.events.some(e => e.title === 'Sequence gap'), true);
+  assert.equal(model.events.find(e => e.title === 'Sequence gap').kind, 'INTERNAL');
 });
 
 test('interleaved frame rejects pending checkpoint', () => {
@@ -159,6 +162,7 @@ test('interleaved frame rejects pending checkpoint', () => {
   assert.equal(model.queueKnown, false);
   assert.equal(model.events.some(e => e.title === 'Checkpoint interrupted'), true);
   assert.equal(model.events.at(-1).title, 'Checkpoint rejected');
+  assert.equal(model.events.at(-1).kind, 'INTERNAL');
 });
 
 test('input and remove mutate known queue', () => {
@@ -217,6 +221,22 @@ test('export and import restore queue and events', () => {
   assert.equal(imported.queueKnown, true);
   assert.equal(imported.queue[0].id, 31);
   assert.equal(imported.events.at(-1).timestampMicros, 2004n);
+  assert.equal(imported.events[0].kind, 'CHECKPOINT');
+  assert.equal(imported.events.at(-1).kind, 'CHECKPOINT');
+});
+
+test('older exports migrate successful checkpoints without hiding errors', () => {
+  const model = new trace.TraceModel();
+  const parser = new trace.TraceParser();
+  for (const bytes of [hello(1), snapBegin(2, 0), snapEnd(3, 0), snapEnd(4, 0)]) {
+    for (const record of parser.push(bytes)) model.applyRecord(record);
+  }
+  const state = JSON.parse(JSON.stringify(model.serialize()));
+  state.events.forEach(event => { event.kind = 'INTERNAL'; });
+  const imported = new trace.TraceModel();
+  imported.importState(state);
+  assert.deepEqual(imported.events.map(event => event.kind), ['CHECKPOINT', 'CHECKPOINT', 'INTERNAL']);
+  assert.equal(imported.events.at(-1).title, 'Checkpoint rejected');
 });
 
 test('parser reports unsupported KBT version explicitly', () => {
@@ -409,4 +429,169 @@ test('shortcut, modifier, release and named-key rows do not claim typed text', (
   assert.equal(translated('fr-FR', 0, 40).primary, 'Enter');
   assert.equal(translated('fr-FR', 0, 89).primary, 'Keypad 1');
   assert.equal(translated('en-US', 0, 250).primary, 'HID 0xfa');
+});
+
+test('only debounce, overlap and layer decisions are INTERNAL; queue bookkeeping is DETAILS', () => {
+  const model = new trace.TraceModel();
+  const parser = new trace.TraceParser();
+  const feed = bytes => { for (const record of parser.push(bytes)) model.applyRecord(record); };
+  for (const bytes of [hello(1), snapBegin(2, 0), snapEnd(3, 0), input(4, 42), remove(5, 42)]) feed(bytes);
+  assert.equal(model.events.at(-1).kind, 'DETAILS');
+  assert.equal(model.queueKnown, true);
+  assert.equal(model.queue.length, 0);
+  for (let action = 1; action <= 9; action++) {
+    feed(frame(4, action + 5, 5000 + action * 100, p => {
+      p.setUint32(0, 42, true);
+      p.setUint8(8, action);
+      p.setUint8(9, 1);
+    }));
+    assert.equal(model.events.at(-1).kind, [2, 4, 9].includes(action) ? 'INTERNAL' : 'DETAILS');
+  }
+  assert.deepEqual(model.events.filter(e => e.kind === 'INTERNAL').map(e => e.title),
+    ['Debounced key pair', 'Overlap removed', 'Layer changed']);
+  feed(frame(4, 15, 7000, p => p.setUint8(8, 255)));
+  assert.equal(model.events.at(-1).kind, 'INTERNAL');
+  assert.equal(model.events.at(-1).severity, 'error');
+  feed(frame(10, 16, 7100, p => p.setUint8(0, 2)));
+  assert.equal(model.events.at(-1).kind, 'INTERNAL');
+
+  const exported = JSON.parse(JSON.stringify(model.serialize()));
+  const imported = new trace.TraceModel();
+  imported.importState(exported);
+  assert.deepEqual(imported.events.map(e => e.kind), model.events.map(e => e.kind));
+  exported.events.forEach(e => { if (e.kind === 'DETAILS') e.kind = 'INTERNAL'; });
+  imported.importState(exported);
+  assert.deepEqual(imported.events.map(e => e.kind), model.events.map(e => e.kind));
+});
+
+test('diagnostic summaries keep basic context without replacing inspection details', () => {
+  const cases = [
+    ['INTERNAL', { type: 4, action: 2, primaryID: 42, relatedID: 43 }, 'Debounced key pair #42 / #43'],
+    ['INTERNAL', { type: 4, action: 4, primaryID: 42, relatedID: 43 }, 'Overlap removed #42 / #43'],
+    ['INTERNAL', { type: 4, action: 9, primaryID: 42, layerMask: 3 }, 'Layer changed: 0x03'],
+    ['DETAILS', { type: 4, action: 1, primaryID: 42 }, 'debounce wait #42'],
+    ['DETAILS', { type: 3, id: 42, reason: 2 }, 'Remove #42 (debounce)'],
+    ['CHECKPOINT', { type: 1, streamId: 7 }, 'Stream metadata: stream 7'],
+    ['CHECKPOINT', { type: 8, count: 2 }, 'Queue checkpoint: 2 pending']
+  ];
+  for (const [kind, raw, expected] of cases) {
+    const event = { kind, raw, title: 'Original title', severity: 'info', detail: 'Full detail\nwith extra context' };
+    assert.equal(trace.eventTitle(event), expected);
+    assert.equal(trace.eventPresentation(event).combination, '');
+    assert.equal(event.detail, 'Full detail\nwith extra context');
+    assert.equal(event.title, 'Original title');
+  }
+  assert.equal(trace.eventTitle({ kind: 'INTERNAL', raw: { type: 3, id: 42, reason: 2 }, severity: 'error', title: 'Parser/protocol issue' }), 'Parser/protocol issue');
+});
+
+function layerMetadata(seq, mask, name, time = 1000) {
+  return frame(13, seq, time, (p, bytes) => {
+    const text = new TextEncoder().encode(name);
+    p.setUint8(0, mask);
+    p.setUint8(1, text.length);
+    bytes.set(text.slice(0, 24), 22);
+  });
+}
+
+function layerChange(seq, mask, time = 2000 + seq) {
+  return frame(4, seq, time, p => {
+    p.setUint32(0, 42, true);
+    p.setUint8(8, 9);
+    p.setUint8(9, mask);
+  });
+}
+
+test('firmware metadata names effective masks and remains attached to exported events', () => {
+  const model = new trace.TraceModel();
+  const parser = new trace.TraceParser();
+  const feed = bytes => { for (const record of parser.push(bytes)) model.applyRecord(record); };
+  const names = ['Base', 'Shift', 'Function', 'Function', 'Accent', 'Accent', 'Accent 2', 'Accent 2'];
+  feed(hello(1, names.length));
+  let seq = 2;
+  names.forEach((name, mask) => feed(layerMetadata(seq++, mask, name)));
+  assert.equal(model.events.length, 1); // Name records do not add noisy timeline rows.
+  names.forEach((name, mask) => {
+    feed(layerChange(seq++, mask));
+    const event = model.events.at(-1);
+    assert.equal(event.layerName, name);
+    assert.equal(trace.eventTitle(event), `Layer changed: ${name}`);
+    assert.equal(event.raw.layerMask, mask);
+    assert.ok(event.detail.includes(`layer mask 0x${mask.toString(16)}`));
+  });
+  const exported = JSON.parse(JSON.stringify(model.serialize()));
+  const imported = new trace.TraceModel();
+  imported.importState(exported);
+  assert.equal(imported.layerNames[6], 'Accent 2');
+  assert.equal(trace.eventTitle(imported.events.at(-1)), 'Layer changed: Accent 2');
+
+  const oldEvent = model.events.at(-1);
+  model.beginLiveSession();
+  feed(layerChange(1, 6, 3000));
+  assert.equal(trace.eventTitle(model.events.at(-1)), 'Layer changed: 0x06');
+  feed(hello(2, 1, 123, 4000));
+  feed(layerMetadata(3, 0, 'Custom base', 4000));
+  feed(layerChange(4, 0, 4100));
+  assert.equal(trace.eventTitle(model.events.at(-1)), 'Layer changed: Custom base');
+  assert.equal(trace.eventTitle(oldEvent), 'Layer changed: Accent 2');
+});
+
+test('partial or lost layer metadata never supplies stale or guessed names', () => {
+  const model = new trace.TraceModel();
+  const parser = new trace.TraceParser();
+  const feed = bytes => { for (const record of parser.push(bytes)) model.applyRecord(record); };
+  feed(hello(1, 2));
+  feed(layerMetadata(2, 0, 'Base'));
+  assert.deepEqual(model.layerNames, {});
+  feed(layerChange(3, 0));
+  assert.equal(trace.eventTitle(model.events.at(-1)), 'Layer changed: 0x00');
+  assert.ok(model.events.some(event => event.detail.includes('metadata interrupted')));
+
+  feed(hello(4, 2, 99, 3000));
+  feed(layerMetadata(5, 0, 'Base', 3000));
+  feed(layerMetadata(7, 1, 'Shift', 3000)); // Missing sequence 6 invalidates the whole set.
+  feed(layerChange(8, 0, 3100));
+  assert.equal(trace.eventTitle(model.events.at(-1)), 'Layer changed: 0x00');
+  feed(hello(9, 1, 99, 4000));
+  feed(layerMetadata(10, 0, 'Recovered base', 4000));
+  feed(layerChange(11, 0, 4100));
+  assert.equal(trace.eventTitle(model.events.at(-1)), 'Layer changed: Recovered base');
+});
+
+test('bad layer metadata is rejected visibly, including duplicate masks', () => {
+  for (const bad of [
+    layerMetadata(2, 0, ''),
+    layerMetadata(2, 0, 'x'.repeat(25)),
+    layerMetadata(2, 0, 'bad\nname'),
+    layerMetadata(2, 1, 'Wrong order')
+  ]) {
+    const model = new trace.TraceModel();
+    const parser = new trace.TraceParser();
+    for (const bytes of [hello(1, 2), bad]) for (const record of parser.push(bytes)) model.applyRecord(record);
+    assert.equal(model.events.at(-1).severity, 'error');
+    assert.deepEqual(model.layerNames, {});
+  }
+  const model = new trace.TraceModel();
+  const parser = new trace.TraceParser();
+  for (const bytes of [hello(1, 2), layerMetadata(2, 0, 'Base'), layerMetadata(3, 0, 'Duplicate')]) {
+    for (const record of parser.push(bytes)) model.applyRecord(record);
+  }
+  assert.equal(model.events.at(-1).severity, 'error');
+  assert.deepEqual(model.layerNames, {});
+});
+
+test('old captures fall back to masks and imported layer names are validated atomically', () => {
+  const model = new trace.TraceModel();
+  const parser = new trace.TraceParser();
+  for (const bytes of [hello(), layerChange(2, 6)]) for (const record of parser.push(bytes)) model.applyRecord(record);
+  assert.equal(trace.eventTitle(model.events.at(-1)), 'Layer changed: 0x06');
+  const old = JSON.parse(JSON.stringify(model.serialize()));
+  delete old.layerNames;
+  delete old.hello.layerCount;
+  old.events.forEach(event => { delete event.layerName; });
+  const imported = new trace.TraceModel();
+  imported.importState(old);
+  assert.equal(trace.eventTitle(imported.events.at(-1)), 'Layer changed: 0x06');
+  assert.throws(() => imported.importState({ ...old, layerNames: { 256: 'Bad mask' } }));
+  assert.throws(() => imported.importState({ ...old, layerNames: { 6: 'x'.repeat(25) } }));
+  assert.equal(trace.eventTitle(imported.events.at(-1)), 'Layer changed: 0x06');
 });

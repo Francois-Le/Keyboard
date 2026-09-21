@@ -3,6 +3,20 @@
 #include "event.h"
 
 namespace Trace {
+struct LayerName {
+  char text[25];
+};
+constexpr bool validLayerNames(const LayerName* layers, uint16_t count) {
+  for (uint16_t i = 0; i < count; ++i) {
+    uint8_t length = 0;
+    while (length < 25 && layers[i].text[length]) {
+      if (layers[i].text[length] < 32 || layers[i].text[length] > 126) return false;
+      ++length;
+    }
+    if (length == 0 || length > 24) return false;
+  }
+  return true;
+}
 enum class Removal : uint8_t { PROCESSED = 1, DEBOUNCE, TAP, OVERLAP };
 enum class Action : uint8_t {
   DEBOUNCE_WAIT = 1, DEBOUNCE_CANCEL, OVERLAP_WAIT, OVERLAP_TAP,
@@ -10,7 +24,7 @@ enum class Action : uint8_t {
 };
 
 #if REMOTE_TRACE
-void begin();
+void begin(const LayerName* layers, uint16_t count);
 void service(EventQueue& queue);
 void input(const Event& event, uint8_t slot);
 void removed(const Event& event, uint8_t slot, Removal reason);
@@ -20,7 +34,7 @@ void output(const uint8_t* keys, uint8_t modifiers, uint8_t media, bool keyboard
 void i2cReset(uint8_t chip);
 void queueOverflow(uint8_t head, uint8_t tail);
 #else
-inline void begin() {}
+inline void begin(const LayerName*, uint16_t) {}
 inline void service(EventQueue&) {}
 inline void input(const Event&, uint8_t) {}
 inline void removed(const Event&, uint8_t, Removal) {}

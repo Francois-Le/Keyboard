@@ -18,10 +18,12 @@ uint64_t elapsed = 0;
 bool connected = false;
 uint32_t waitId = 0, waitRelated = 0;
 uint8_t waitAction = 0;
+const Trace::LayerName* layerNames = nullptr;
+uint16_t layerCount = 0;
 
 enum class Type : uint8_t {
   HELLO = 1, INPUT, REMOVE, DECISION, HID,
-  SNAPSHOT_BEGIN, SNAPSHOT_ENTRY, SNAPSHOT_END, LOSS, I2C_RESET, QUEUE_OVERFLOW, HID_OUTPUT
+  SNAPSHOT_BEGIN, SNAPSHOT_ENTRY, SNAPSHOT_END, LOSS, I2C_RESET, QUEUE_OVERFLOW, HID_OUTPUT, LAYER_NAME
 };
 
 uint64_t now() {
@@ -98,7 +100,7 @@ bool checkpoint(EventQueue& queue, uint64_t time) {
   for (auto it = queue.begin(); it != queue.end(); it = queue.next(it)) ++count;
   // This runs only on the scan thread. Reserve the entire batch before emitting
   // anything, so a slow reader cannot produce a partial logical checkpoint.
-  if (CAPACITY - size < count + 3) return false;
+  if (CAPACITY - size < count + 3 + layerCount) return false;
 
   uint8_t hello[26] = {};
   hello[0] = VERSION;
@@ -110,7 +112,15 @@ bool checkpoint(EventQueue& queue, uint64_t time) {
   put32(hello + 12, MAX_HOLD_TIME);
   put32(hello + 16, KEY_PRESS_LENGTH);
   put32(hello + 20, stream);
+  put16(hello + 24, layerCount);
   emit(Type::HELLO, hello, time);
+  for (uint16_t mask = 0; mask < layerCount; ++mask) {
+    uint8_t payload[26] = {};
+    payload[0] = mask;
+    payload[1] = strlen(layerNames[mask].text);
+    memcpy(payload + 2, layerNames[mask].text, payload[1]);
+    emit(Type::LAYER_NAME, payload, time);
+  }
 
   uint8_t boundary[26] = {};
   put16(boundary, count);
@@ -126,7 +136,9 @@ bool checkpoint(EventQueue& queue, uint64_t time) {
 }
 }
 
-void Trace::begin() {
+void Trace::begin(const LayerName* layers, uint16_t count) {
+  layerNames = layers;
+  layerCount = count;
   _SerialUSB.begin(115200);
   now();
 }

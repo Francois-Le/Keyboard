@@ -4,7 +4,7 @@
   const trace = root.KBTTrace;
   if (!trace) throw new Error('KBTTrace must be loaded before app.js');
 
-  const KIND_FILTERS = ['INPUT', 'INTERNAL', 'OUTPUT'];
+  const KIND_FILTERS = ['INPUT', 'INTERNAL', 'OUTPUT', 'DETAILS', 'CHECKPOINT'];
   const MAX_RENDERED_EVENTS = 300;
   const RENDER_INTERVAL_MS = 50;
   const LAYOUT_STORAGE_KEY = 'keyboard-trace.layout';
@@ -88,7 +88,7 @@
       this.seenHelloThisConnection = false;
       this.waitingTimer = null;
       this.follow = true;
-      this.filters = new Set(KIND_FILTERS);
+      this.filters = new Set(['INPUT', 'INTERNAL', 'OUTPUT']);
       this.selectedEventId = null;
       this.zoom = 1;
       this.renderQueued = false;
@@ -114,7 +114,9 @@
       $('zoom').addEventListener('input', event => { this.zoom = Number(event.target.value); this.render(); });
       $('keyboardLayout').addEventListener('change', event => this.setKeyboardLayout(event.target.value));
       for (const kind of KIND_FILTERS) {
-        $(`filter${kind}`).addEventListener('change', event => {
+        const checkbox = $(`filter${kind}`);
+        checkbox.checked = this.filters.has(kind);
+        checkbox.addEventListener('change', event => {
           if (event.target.checked) this.filters.add(kind); else this.filters.delete(kind);
           this.render();
         });
@@ -387,8 +389,7 @@
       const desiredGap = Math.round(deltaMs * this.zoom * 0.08);
       const gap = Math.max(6, Math.min(110, desiredGap));
       const row = document.createElement('button');
-      const compact = event.kind === 'INPUT' || event.kind === 'OUTPUT';
-      row.className = `event ${event.kind.toLowerCase()} ${compact ? 'compact' : ''} ${event.severity} ${event.id === this.selectedEventId ? 'selected' : ''}`;
+      row.className = `event ${event.kind.toLowerCase()} compact ${event.severity} ${event.id === this.selectedEventId ? 'selected' : ''}`;
       row.type = 'button';
       row.style.marginTop = `${gap}px`;
       row.addEventListener('click', () => {
@@ -397,13 +398,6 @@
         $('followToggle').checked = false;
         this.render();
       });
-
-      if (desiredGap > 110 && !compact) {
-        const compressed = document.createElement('div');
-        compressed.className = 'compressedGap';
-        compressed.textContent = `compressed visible gap: +${formatMicros(visibleDeltaUs)}`;
-        row.appendChild(compressed);
-      }
 
       const lane = document.createElement('span');
       lane.className = 'lane';
@@ -414,32 +408,24 @@
       const presentation = trace.eventPresentation(event, this.keyboardLayout);
       const displayTitle = trace.eventTitle(event, this.keyboardLayout);
       title.textContent = presentation.primary;
-      if (compact) {
-        main.append(title);
-        if (presentation.combination) {
-          const combination = document.createElement('span');
-          combination.className = 'keyCombination';
-          combination.textContent = ` ${presentation.combination}`;
-          main.append(combination);
-        }
-        const time = document.createElement('small');
-        time.className = 'eventTime';
-        time.textContent = formatMicros(event.timestampMicros);
-        row.title = `${displayTitle}\nseq ${event.sequence ?? '—'}, visible delta ${formatMicros(visibleDeltaUs)}${desiredGap > 110 ? ' (gap compressed)' : ''}\nClick for full details`;
-        row.append(lane, main, time);
-        return row;
+      main.append(title);
+      if (presentation.combination) {
+        const combination = document.createElement('span');
+        combination.className = 'keyCombination';
+        combination.textContent = ` ${presentation.combination}`;
+        main.append(combination);
       }
-      const meta = document.createElement('small');
-      meta.textContent = `seq ${event.sequence ?? '—'} · t ${formatMicros(event.timestampMicros)} · visible Δ ${formatMicros(visibleDeltaUs)} · stored Δ ${formatMicros(event.deltaUs)}`;
-      const detail = document.createElement('span');
-      detail.textContent = event.detail;
-      main.append(title, meta, detail);
-      row.append(lane, main);
+      const time = document.createElement('small');
+      time.className = 'eventTime';
+      time.textContent = formatMicros(event.timestampMicros);
+      row.title = `${displayTitle}\nseq ${event.sequence ?? '—'}, visible delta ${formatMicros(visibleDeltaUs)}${desiredGap > 110 ? ' (gap compressed)' : ''}\nClick for full details`;
+      row.append(lane, main, time);
       return row;
     }
 
     renderDetails() {
-      const selected = this.model.events.find(e => e.id === this.selectedEventId) || this.model.events[this.model.events.length - 1];
+      const visible = this.filteredEvents();
+      const selected = visible.find(e => e.id === this.selectedEventId) || visible[visible.length - 1];
       const panel = $('details');
       if (!selected) {
         panel.textContent = 'Click an event to inspect queue after it.';

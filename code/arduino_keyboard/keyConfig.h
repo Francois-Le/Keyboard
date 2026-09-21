@@ -1,4 +1,5 @@
 #pragma once
+#include "trace.h"
 
 struct Forced
 {
@@ -124,3 +125,13 @@ K s_keyMaps [8][5][12] =
   accentLayer2,
   accentLayer2
 };
+
+// Indexed by the same active-layer mask as s_keyMaps (not individual layer bits).
+constexpr Trace::LayerName s_layerNames[] = {
+  {"Base"}, {"Shift"}, {"Function"}, {"Function"},
+  {"Accent"}, {"Accent"}, {"Accent 2"}, {"Accent 2"}
+};
+constexpr uint16_t LAYER_COUNT = sizeof(s_layerNames) / sizeof(s_layerNames[0]);
+static_assert(LAYER_COUNT == sizeof(s_keyMaps) / sizeof(s_keyMaps[0]), "Each key map needs a trace name");
+static_assert(Trace::validLayerNames(s_layerNames, LAYER_COUNT), "Layer names must be 1..24 printable ASCII characters");
+static_assert(LAYER_COUNT + 258 <= 512, "Layer metadata and a full queue checkpoint must fit the trace ring");

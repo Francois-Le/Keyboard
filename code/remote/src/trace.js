@@ -20,11 +20,14 @@
     9: 'LOSS',
     10: 'I2C_RESET',
     11: 'QUEUE_OVERFLOW',
-    12: 'HID_OUTPUT'
+    12: 'HID_OUTPUT',
+    13: 'LAYER_NAME'
   };
   const INPUT = 'INPUT';
   const INTERNAL = 'INTERNAL';
   const OUTPUT = 'OUTPUT';
+  const CHECKPOINT = 'CHECKPOINT';
+  const DETAILS = 'DETAILS';
   const REMOVE_REASONS = {
     1: 'processed',
     2: 'debounce',
@@ -42,6 +45,15 @@
     8: 'process',
     9: 'layer'
   };
+  const INTERNAL_ACTIONS = {
+    2: 'Debounced key pair',
+    4: 'Overlap removed',
+    9: 'Layer changed'
+  };
+
+  function decisionKind(action) {
+    return Object.hasOwn(INTERNAL_ACTIONS, action) ? INTERNAL : DETAILS;
+  }
   const MAX_QUEUE_ENTRIES = 255;
   const MAX_ISSUES = 200;
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
@@ -154,7 +166,25 @@
     if (!Object.hasOwn(KEYBOARD_LAYOUTS, layout)) throw new Error(`Unsupported keyboard layout: ${layout}`);
     const raw = event.raw;
     const fallback = { primary: event.title, combination: '' };
-    if (event.kind !== OUTPUT || !raw) return fallback;
+    if (!raw) return fallback;
+    if (event.kind !== OUTPUT) {
+      if (event.kind === CHECKPOINT) {
+        if (raw.type === 1 && Number.isInteger(raw.streamId)) fallback.primary = `Stream metadata: stream ${raw.streamId}`;
+        if (raw.type === 8 && Number.isInteger(raw.count)) fallback.primary = `Queue checkpoint: ${raw.count} pending`;
+      } else if (!['warn', 'error'].includes(event.severity)) {
+        if (raw.type === 3 && Number.isInteger(raw.id) && Object.hasOwn(REMOVE_REASONS, raw.reason)) {
+          fallback.primary = `Remove #${raw.id} (${REMOVE_REASONS[raw.reason]})`;
+        }
+        if (raw.type === 4 && Number.isInteger(raw.primaryID) && Object.hasOwn(ACTIONS, raw.action)) {
+          const action = INTERNAL_ACTIONS[raw.action] || ACTIONS[raw.action];
+          fallback.primary = `${action} #${raw.primaryID}`;
+          if ([2, 4].includes(raw.action) && raw.relatedID) fallback.primary += ` / #${raw.relatedID}`;
+          if (raw.action === 9 && Number.isInteger(raw.layerMask)) fallback.primary = `Layer changed: ${event.layerName || `0x${raw.layerMask.toString(16).padStart(2, '0')}`}`;
+        }
+        if (raw.type === 10 && Number.isInteger(raw.chipIndex)) fallback.primary = `I2C reset: chip ${raw.chipIndex}`;
+      }
+      return fallback;
+    }
     // Imported captures may not contain valid raw reports; retain their saved title.
     const validReport = (report, id, length) => Array.isArray(report) && report.length === length &&
       report[0] === id && report.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255);
@@ -320,6 +350,7 @@
         frame.maxHoldUs = readU32(payload, 12);
         frame.keyPressMs = readU32(payload, 16);
         frame.streamId = readU32(payload, 20);
+        frame.layerCount = payload.getUint16(24, true);
         break;
       case 2:
       case 7:
@@ -378,6 +409,11 @@
         frame.keyboardReport = Array.from(bytes.slice(30, 39));
         frame.mediaReport = Array.from(bytes.slice(39, 41));
         break;
+      case 13:
+        frame.layerMask = payload.getUint8(0);
+        frame.nameLength = payload.getUint8(1);
+        frame.layerName = String.fromCharCode(...bytes.slice(22, 22 + Math.min(frame.nameLength, 24)));
+        break;
     }
     return frame;
   }
@@ -412,11 +448,17 @@
       this.issues = [];
       this.lastHidReports = new Map();
       this.lastFrameTimestamp = null;
+      this.resetLayerNames();
     }
 
     clearVisible() {
       this.events = [];
       this.lastVisibleTimestamp = null;
+    }
+
+    resetLayerNames() {
+      this.layerNames = {};
+      this.pendingLayerNames = null;
     }
 
     beginLiveSession(label = 'Live connection boundary') {
@@ -427,7 +469,8 @@
       this.streamId = null;
       this.lastHidReports = new Map();
       this.lastFrameTimestamp = null;
-      return this.addEvent(INTERNAL, label, 'Parser/model live state reset for a new serial connection. Earlier visible events are preserved, but queue is unknown until the next complete checkpoint.', { timestampMicros: this.lastVisibleTimestamp, sequence: null, typeName: 'LOCAL' }, { severity: 'warn' });
+      this.resetLayerNames();
+      return this.addEvent(DETAILS, label, 'Parser/model live state reset for a new serial connection. Earlier visible events are preserved, but queue is unknown until the next complete checkpoint.', { timestampMicros: this.lastVisibleTimestamp, sequence: null, typeName: 'LOCAL' }, { severity: 'muted' });
     }
 
     applyRecord(record) {
@@ -440,6 +483,7 @@
     applyFrame(frame) {
       const generated = [];
       if (this.lastFrameTimestamp !== null && frame.timestampMicros < this.lastFrameTimestamp) {
+        this.resetLayerNames();
         this.queueKnown = false;
         this.pendingSnapshot = null;
         this.lastHidReports.clear();
@@ -447,6 +491,7 @@
       }
       this.lastFrameTimestamp = frame.timestampMicros;
       if (this.expectedSequence !== null && frame.sequence !== this.expectedSequence) {
+        this.resetLayerNames();
         this.queueKnown = false;
         this.pendingSnapshot = null;
         this.lastHidReports.clear();
@@ -460,6 +505,9 @@
         return generated;
       }
 
+      if (this.pendingLayerNames && frame.type !== 13) {
+        generated.push(this.addIssue('Layer-name metadata interrupted; names remain unknown until a complete metadata set.', frame));
+      }
       if (this.pendingSnapshot && frame.type !== 7 && frame.type !== 8) {
         this.pendingSnapshot = null;
         this.queueKnown = false;
@@ -485,6 +533,9 @@
         case 12:
           generated.push(this.handleOutput(frame));
           break;
+        case 13:
+          generated.push(this.handleLayerName(frame));
+          break;
         case 6:
           generated.push(this.handleSnapshotBegin(frame));
           break;
@@ -495,6 +546,7 @@
           generated.push(this.handleSnapshotEnd(frame));
           break;
         case 9:
+          this.resetLayerNames();
           this.queueKnown = false;
           this.pendingSnapshot = null;
           this.lastHidReports.clear();
@@ -523,8 +575,11 @@
         overlapUs: frame.overlapUs,
         maxHoldUs: frame.maxHoldUs,
         keyPressMs: frame.keyPressMs,
-        streamId: frame.streamId
+        streamId: frame.streamId,
+        layerCount: frame.layerCount
       };
+      this.resetLayerNames();
+      if (frame.layerCount) this.pendingLayerNames = { count: frame.layerCount, nextMask: 0, names: {} };
       this.streamId = frame.streamId;
       if (changedStream) {
         this.queueKnown = false;
@@ -533,7 +588,20 @@
       }
       const title = changedStream ? 'New trace stream' : 'HELLO checkpoint';
       const detail = `board v${frame.boardVersion}, ${frame.rows}x${frame.cols}, stream ${frame.streamId}, debounce ${frame.debounceUs}µs, overlap ${frame.overlapEnabled ? frame.overlapUs + 'µs' : 'off'}. HELLO does not establish queue contents.`;
-      return this.addEvent(INTERNAL, title, detail, frame, { severity: changedStream ? 'info' : 'muted' });
+      return this.addEvent(CHECKPOINT, title, detail, frame, { severity: changedStream ? 'info' : 'muted' });
+    }
+
+    handleLayerName(frame) {
+      const pending = this.pendingLayerNames;
+      if (!pending || frame.layerMask !== pending.nextMask) {
+        return this.addIssue(`Unexpected layer-name mask ${frame.layerMask}; a complete ordered metadata set is required.`, frame);
+      }
+      pending.names[frame.layerMask] = frame.layerName;
+      if (++pending.nextMask === pending.count) {
+        this.layerNames = pending.names;
+        this.pendingLayerNames = null;
+      }
+      return null;
     }
 
     handleInput(frame) {
@@ -569,7 +637,7 @@
         }
         this.queue.splice(index, 1);
       }
-      return this.addEvent(INTERNAL, 'Queue remove', `id ${frame.id}, slot ${frame.slot}, reason ${reason}.`, frame, { severity: REMOVE_REASONS[frame.reason] ? 'info' : 'warn' });
+      return this.addEvent(DETAILS, 'Queue remove', `id ${frame.id}, slot ${frame.slot}, reason ${reason}.`, frame);
     }
 
     handleDecision(frame) {
@@ -577,7 +645,8 @@
       if (!ACTIONS[frame.action]) {
         return this.addEvent(INTERNAL, 'Invalid decision', `Unknown action ${frame.action} for primary ${frame.primaryID}.`, frame, { severity: 'error' });
       }
-      return this.addEvent(INTERNAL, 'Decision: ' + action, `primary ${frame.primaryID}, related ${frame.relatedID}, layer mask 0x${frame.layerMask.toString(16)}, intervening ${frame.interveningCount}.`, frame);
+      const layerName = frame.action === 9 ? this.layerNames[frame.layerMask] || null : null;
+      return this.addEvent(decisionKind(frame.action), INTERNAL_ACTIONS[frame.action] || 'Decision: ' + action, `primary ${frame.primaryID}, related ${frame.relatedID}, layer mask 0x${frame.layerMask.toString(16)}${layerName ? ` (${layerName})` : ''}, intervening ${frame.interveningCount}.`, frame, { layerName });
     }
 
     handleHid(frame) {
@@ -657,7 +726,7 @@
       if (ringProblem) return this.addIssue(ringProblem, frame);
       this.queue = snap.entries.slice();
       this.queueKnown = true;
-      return this.addEvent(INTERNAL, 'Queue checkpoint', `Checkpoint ${frame.checkpointID}: ${frame.count} queued event(s), head ${snap.head}, tail ${snap.tail}.`, frame, { severity: 'checkpoint' });
+      return this.addEvent(CHECKPOINT, 'Queue checkpoint', `Checkpoint ${frame.checkpointID}: ${frame.count} queued event(s), head ${snap.head}, tail ${snap.tail}.`, frame, { severity: 'checkpoint' });
     }
 
     validateKey(frame) {
@@ -673,6 +742,7 @@
       if (frame.type === 1) {
         if (frame.rows < 1 || frame.rows > 32 || frame.cols < 1 || frame.cols > 32) return `Invalid HELLO dimensions ${frame.rows}x${frame.cols}.`;
         if (frame.overlapRaw !== 0 && frame.overlapRaw !== 1) return `Invalid HELLO overlapEnabled value ${frame.overlapRaw}.`;
+        if (frame.layerCount > 256) return `Invalid HELLO layer count ${frame.layerCount}.`;
       }
       if (frame.type === 2 || frame.type === 7) {
         if (frame.pressedRaw !== 0 && frame.pressedRaw !== 1) return `Invalid ${frame.typeName} pressed value ${frame.pressedRaw}.`;
@@ -688,6 +758,9 @@
       if (frame.type === 12) {
         if (![0, 1].includes(frame.keyboardSuccessRaw) || ![0, 1].includes(frame.mediaSuccessRaw)) return 'Invalid HID_OUTPUT success value.';
         if (frame.keyboardReport[0] !== 1 || frame.mediaReport[0] !== 3) return 'Invalid HID_OUTPUT report IDs.';
+      }
+      if (frame.type === 13 && (frame.nameLength < 1 || frame.nameLength > 24 || !/^[\x20-\x7e]{1,24}$/.test(frame.layerName) || !frame.layerName.trim())) {
+        return 'Invalid layer name: expected 1..24 printable ASCII bytes.';
       }
       if ((frame.type === 6 || frame.type === 8) && frame.count > MAX_QUEUE_ENTRIES) return `${frame.typeName} count ${frame.count} exceeds ${MAX_QUEUE_ENTRIES}.`;
       return null;
@@ -756,6 +829,7 @@
     }
 
     addIssue(message, frame) {
+      this.resetLayerNames();
       this.queueKnown = false;
       this.pendingSnapshot = null;
       this.lastHidReports.clear();
@@ -781,6 +855,7 @@
         timestampMicros: ts,
         deltaUs,
         severity: options.severity || 'info',
+        layerName: options.layerName || null,
         queueKnown: this.queueKnown,
         queueAfter: this.queueKnown ? this.queue.map(q => ({ ...q })) : null,
         raw: frame ? jsonSafe(frame) : null
@@ -799,6 +874,7 @@
         queue: this.queue,
         hello: this.hello,
         streamId: this.streamId,
+        layerNames: { ...this.layerNames },
         expectedSequence: this.expectedSequence,
         nextEventId: this.nextEventId,
         events: jsonSafe(this.events),
@@ -812,6 +888,8 @@
       this.queue = next.queue;
       this.hello = next.hello;
       this.streamId = next.streamId;
+      this.layerNames = next.layerNames;
+      this.pendingLayerNames = null;
       this.expectedSequence = next.expectedSequence;
       this.nextEventId = next.nextEventId;
       this.issues = next.issues;
@@ -831,6 +909,7 @@
         queue: cleanQueue,
         hello: state.hello === null || state.hello === undefined ? null : this.validateHelloImport(state.hello),
         streamId: safeOptionalUint32(state.streamId, 'streamId'),
+        layerNames: this.validateLayerNames(state.layerNames),
         expectedSequence: safeOptionalUint32(state.expectedSequence, 'expectedSequence'),
         nextEventId: Math.max(safeOptionalPositiveInt(state.nextEventId, 'nextEventId') || 1, maxId + 1),
         issues: Array.isArray(state.issues) ? state.issues.slice(-MAX_ISSUES).map((issue, index) => ({
@@ -851,17 +930,40 @@
         overlapUs: safeUint32(hello.overlapUs, 'hello.overlapUs'),
         maxHoldUs: safeUint32(hello.maxHoldUs, 'hello.maxHoldUs'),
         keyPressMs: safeUint32(hello.keyPressMs, 'hello.keyPressMs'),
-        streamId: safeUint32(hello.streamId, 'hello.streamId')
+        streamId: safeUint32(hello.streamId, 'hello.streamId'),
+        layerCount: safeRange(hello.layerCount ?? 0, 'hello.layerCount', 0, 256)
       };
+    }
+
+    validateLayerNames(names) {
+      if (names === undefined) return {};
+      if (!names || typeof names !== 'object' || Array.isArray(names)) throw new Error('layerNames must be a mask/name object.');
+      const result = {};
+      for (const [mask, name] of Object.entries(names)) {
+        if (!/^(0|[1-9]\d{0,2})$/.test(mask) || Number(mask) > 255) throw new Error('Invalid layer-name mask.');
+        result[mask] = safeLayerName(name);
+      }
+      return result;
     }
 
     validateEvent(e, index) {
       if (!e || typeof e !== 'object') throw new Error(`events[${index}] is not an object.`);
       const timestampMicros = e.timestampMicros === null || e.timestampMicros === undefined ? null : BigInt(String(e.timestampMicros));
       const queueKnown = !!e.queueKnown;
+      let kind = KIND_SET.has(e.kind) ? e.kind : fail(`events[${index}].kind is invalid.`);
+      // Older captures classified successful checkpoints as internal events.
+      if (kind === INTERNAL && (
+        (e.typeName === 'HELLO' && ['muted', 'info'].includes(e.severity)) ||
+        (e.typeName === 'SNAPSHOT_END' && e.severity === 'checkpoint')
+      )) kind = CHECKPOINT;
+      if (kind === INTERNAL && e.severity === 'info') {
+        if (e.typeName === 'DECISION' && Object.hasOwn(ACTIONS, e.raw?.action)) kind = decisionKind(e.raw.action);
+        if (e.typeName === 'REMOVE' && e.title === 'Queue remove') kind = DETAILS;
+      }
+      if (kind === INTERNAL && e.typeName === 'LOCAL' && ['New live connection', 'Live connection boundary'].includes(e.title)) kind = DETAILS;
       return {
         id: safeOptionalPositiveInt(e.id, `events[${index}].id`) || index + 1,
-        kind: KIND_SET.has(e.kind) ? e.kind : fail(`events[${index}].kind is invalid.`),
+        kind,
         title: safeString(e.title, `events[${index}].title`, 512),
         detail: safeString(e.detail, `events[${index}].detail`, 2000),
         sequence: safeOptionalUint32(e.sequence, `events[${index}].sequence`),
@@ -869,6 +971,7 @@
         timestampMicros,
         deltaUs: e.deltaUs === null || e.deltaUs === undefined ? null : safeNonNegativeNumber(e.deltaUs, `events[${index}].deltaUs`),
         severity: safeString(e.severity || 'info', `events[${index}].severity`, 20),
+        layerName: e.layerName == null ? null : safeLayerName(e.layerName),
         queueKnown,
         queueAfter: queueKnown ? this.validateQueueArray(e.queueAfter || [], `events[${index}].queueAfter`) : null,
         raw: e.raw === undefined ? null : e.raw
@@ -897,7 +1000,7 @@
     }
   }
 
-  const KIND_SET = new Set([INPUT, INTERNAL, OUTPUT]);
+  const KIND_SET = new Set([INPUT, INTERNAL, OUTPUT, CHECKPOINT, DETAILS]);
 
   function fail(message) {
     throw new Error(message);
@@ -906,6 +1009,11 @@
   function safeString(value, label, maxLength) {
     if (typeof value !== 'string') throw new Error(`${label} must be a string.`);
     if (value.length > maxLength) throw new Error(`${label} exceeds ${maxLength} characters.`);
+    return value;
+  }
+
+  function safeLayerName(value) {
+    if (typeof value !== 'string' || !/^[\x20-\x7e]{1,24}$/.test(value) || !value.trim()) throw new Error('Invalid layer name.');
     return value;
   }
 
@@ -947,6 +1055,8 @@
     INPUT,
     INTERNAL,
     OUTPUT,
+    CHECKPOINT,
+    DETAILS,
     REMOVE_REASONS,
     ACTIONS,
     MAX_IMPORT_BYTES,

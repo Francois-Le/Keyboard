@@ -12,6 +12,8 @@ test('generated index is standalone and local-only', () => {
   assert.doesNotMatch(html, /serviceWorker|sessionStorage/);
   assert.match(html, /localStorage\.setItem\(LAYOUT_STORAGE_KEY, layout\)/);
   assert.match(html, /id="keyboardLayout"/);
+  assert.match(html, /id="filterCHECKPOINT" type="checkbox">/);
+  assert.match(html, /id="filterDETAILS" type="checkbox">/);
 });
 
 test('serial lifecycle opens at 115200 baud with DTR and no writes', () => {

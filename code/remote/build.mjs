@@ -34,6 +34,8 @@ ${css}
     <label><input id="filterINPUT" type="checkbox" checked> INPUT</label>
     <label><input id="filterINTERNAL" type="checkbox" checked> INTERNAL</label>
     <label><input id="filterOUTPUT" type="checkbox" checked> OUTPUT</label>
+    <label><input id="filterDETAILS" type="checkbox"> DETAILS</label>
+    <label><input id="filterCHECKPOINT" type="checkbox"> CHECKPOINT</label>
     <label><input id="followToggle" type="checkbox" checked> Follow while reading</label>
     <label>Zoom <input id="zoom" type="range" min="0.4" max="4" step="0.1" value="1"></label>
     <label>Layout <select id="keyboardLayout">

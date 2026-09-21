@@ -38,6 +38,10 @@ the Mbed core reserves for entering the bootloader.
 - Reconnect starts a new stream with metadata and a queue checkpoint. Complete
   checkpoints are also attempted every two seconds; insufficient buffer space
   defers the whole checkpoint until space is available.
+- Metadata includes the names in `s_layerNames` in `keyConfig.h`, indexed by
+  the same masks as `s_keyMaps`. Keep these aligned when changing key maps.
+  Names are limited to 24 printable ASCII characters and checked at compile
+  time. Metadata and queue records are reserved as one complete batch.
 - Trace overflow drops new trace frames, increments the sequence and exposes a
   loss counter. The browser marks reconstruction unknown until a checkpoint.
   This is separate from the existing processing queue's overflow: that behavior

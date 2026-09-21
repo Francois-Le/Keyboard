@@ -24,7 +24,25 @@ The app never uses 1200-baud reset and never writes commands to the device. If n
 Trace data can reveal typed keys. Exports are JSON and stay local unless you share them.
 
 The app fits the viewport; the timeline and details panel scroll independently.
-Input/output rows have one-line summaries; click a row for timestamps, report
+The **CHECKPOINT** category contains HELLO metadata and successful queue
+snapshots and is unchecked by default. Hidden checkpoints are still processed
+and exported, so queue reconstruction remains accurate. Checkpoint errors and
+trace-loss warnings stay in **INTERNAL**.
+**INTERNAL** shows debounce cancellations, overlap removals and layer changes,
+plus faults such as I2C resets, queue overflow and stream errors.
+Routine waits, processing, tap/hold decisions, queue removals and connection
+boundaries are in **DETAILS**, also unchecked by default. Filtering affects only
+display: all events still update the model and remain available in exports.
+Older imported captures are reclassified into these categories automatically.
+Layer changes use names supplied by firmware metadata, e.g. **Layer changed:
+Accent 2**, with the numeric mask still available in the inspector. The name
+table is indexed by the effective key-map mask, not by individual held layer
+keys: masks 6 and 7 both select Accent 2. Names stay attached to their original
+events across reconnects and capture export/import. Older firmware/captures or
+incomplete/lost metadata display the numeric mask instead of guessing.
+Reflash the firmware to enable layer-name metadata.
+All timeline rows have one-line summaries: event/action, relevant IDs or layer,
+and time. Checkpoints show the stream ID or pending queue count. Click a row for timestamps, report
 bytes, submission results, transitions and queue state. Visible row/column
 numbers start at 1; raw protocol coordinates start at 0. Output summaries show
 the currently reported pressed keys using the selected **Layout**:
@@ -88,9 +106,13 @@ Offsets below are relative to payload byte 20.
 
 ### `1 HELLO`
 
-`boardVersion u8@0`, `rows u8@1`, `cols u8@2`, `overlapEnabled u8@3` (`0/1`), `debounceUs u32@4`, `overlapUs u32@8`, `maxHoldUs u32@12`, `keyPressMs u32@16`, `streamId u32@20`.
+`boardVersion u8@0`, `rows u8@1`, `cols u8@2`, `overlapEnabled u8@3` (`0/1`), `debounceUs u32@4`, `overlapUs u32@8`, `maxHoldUs u32@12`, `keyPressMs u32@16`, `streamId u32@20`, `layerCount u16@24`.
 
 Sent on start and at periodic 2s checkpoints. Repeated `HELLO` does not erase the prior timeline and does not establish queue contents; only a complete snapshot does.
+`layerCount` is zero in older firmware. When nonzero, HELLO is followed by that
+many type-13 records (masks 0 through `layerCount - 1`) before SNAPSHOT_BEGIN.
+The name table is published only when all records arrive in order without gaps.
+The individual name records do not add timeline rows.
 
 ### `2 INPUT` and `7 SNAPSHOT_ENTRY`
 
@@ -145,3 +167,11 @@ Both success flags and durations remain available in the details inspector;
 a partial failure is never presented as a successful combined update.
 Media bits match the firmware descriptor: next track, previous track, stop,
 play/pause, mute, volume up, volume down (bits 0..6).
+
+### `13 LAYER_NAME`
+
+`layerMask u8@0`, `nameLength u8@1`, name bytes at `@2` (1..24 printable ASCII
+bytes, no terminator on the wire; unused payload bytes are zero).
+The current firmware sends `Base`, `Shift`, `Function`, `Function`, `Accent`,
+`Accent`, `Accent 2`, `Accent 2` for masks 0..7. This table is configured next to
+`s_keyMaps` in `keyConfig.h`, not duplicated in the viewer.

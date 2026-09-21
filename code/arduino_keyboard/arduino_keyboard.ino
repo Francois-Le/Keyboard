@@ -105,7 +105,7 @@ void sendCurrentKeyPress() {
 
 
 void setup() {
-  Trace::begin();
+  Trace::begin(s_layerNames, LAYER_COUNT);
 #if ANY_LOG
   Serial.begin(9600);
 #endif

@@ -227,3 +227,81 @@ test('output renders translation and combination as separate styled text spans',
   assert.equal(main.children.length, 2);
   assert.match(row.title, /\{ \(AltGr, '\)/);
 });
+
+test('checkpoints default to hidden but still reconstruct and export queue state', () => {
+  const { elements } = installDom();
+  globalThis.KBTTrace = trace;
+  const { SerialTraceApp, demoFrames } = require('../src/app.js');
+  const app = new SerialTraceApp();
+  app.bindUi();
+  for (const bytes of demoFrames()) for (const record of app.parser.push(bytes)) app.model.applyRecord(record);
+  app.render();
+  assert.equal(elements.get('filterCHECKPOINT').checked, false);
+  assert.equal(app.model.queueKnown, true);
+  assert.equal(app.model.queue.length, 1);
+  assert.equal(app.filteredEvents().some(event => event.kind === 'CHECKPOINT'), false);
+  assert.equal(app.captureExport().events.filter(event => event.kind === 'CHECKPOINT').length, 3);
+  assert.doesNotMatch(elements.get('details').textContent, /^CHECKPOINT/);
+
+  elements.get('filterCHECKPOINT').onchange({ target: { checked: true } });
+  assert.equal(app.filteredEvents().filter(event => event.kind === 'CHECKPOINT').length, 3);
+  assert.match(elements.get('details').textContent, /^CHECKPOINT/);
+  app.selectedEventId = app.model.events.at(-1).id;
+  elements.get('filterCHECKPOINT').onchange({ target: { checked: false } });
+  assert.equal(app.filteredEvents().some(event => event.kind === 'CHECKPOINT'), false);
+  assert.doesNotMatch(elements.get('details').textContent, /^CHECKPOINT/);
+  assert.equal(app.model.queueKnown, true);
+});
+
+test('DETAILS is opt-in while significant decisions and faults remain visible', () => {
+  const { elements } = installDom();
+  globalThis.KBTTrace = trace;
+  const { SerialTraceApp, demoFrames } = require('../src/app.js');
+  const app = new SerialTraceApp();
+  app.bindUi();
+  for (const bytes of demoFrames()) for (const record of app.parser.push(bytes)) app.model.applyRecord(record);
+  for (const action of [2, 4, 9]) {
+    const bytes = makeFrame(4, app.model.expectedSequence, 1300000 + action, p => {
+      p.setUint32(0, 101, true);
+      p.setUint8(8, action);
+    });
+    for (const record of app.parser.push(bytes)) app.model.applyRecord(record);
+  }
+  app.render();
+  assert.equal(elements.get('filterDETAILS').checked, false);
+  assert.equal(app.model.queueKnown, true);
+  assert.equal(app.model.queue.length, 1);
+  assert.equal(app.filteredEvents().some(event => event.kind === 'DETAILS'), false);
+  assert.deepEqual(app.filteredEvents().filter(event => event.kind === 'INTERNAL').map(event => event.title),
+    ['Queue overflow', 'Debounced key pair', 'Overlap removed', 'Layer changed']);
+  assert.equal(app.captureExport().events.filter(event => event.kind === 'DETAILS').length, 3);
+  elements.get('filterDETAILS').onchange({ target: { checked: true } });
+  assert.equal(app.filteredEvents().filter(event => event.kind === 'DETAILS').length, 3);
+  elements.get('filterDETAILS').onchange({ target: { checked: false } });
+  assert.equal(app.filteredEvents().some(event => event.kind === 'DETAILS'), false);
+  assert.equal(app.model.queueKnown, true);
+});
+
+test('all event categories render one summary line and keep details in the inspector', () => {
+  const { elements } = installDom();
+  globalThis.KBTTrace = trace;
+  const { SerialTraceApp, demoFrames } = require('../src/app.js');
+  const app = new SerialTraceApp();
+  app.filters.add('DETAILS');
+  app.filters.add('CHECKPOINT');
+  for (const bytes of demoFrames()) for (const record of app.parser.push(bytes)) app.model.applyRecord(record);
+  assert.equal(new Set(app.model.events.map(event => event.kind)).size, 5);
+  for (const event of app.model.events) {
+    const row = app.renderEvent(event, { timestampMicros: 0n });
+    assert.match(row.className, /compact/);
+    assert.equal(row.children.length, 3);
+    const main = row.children.find(child => child.className === 'eventMain');
+    assert.equal(main.children.length, event.kind === 'OUTPUT' ? 2 : 1);
+    assert.equal(main.children[0].textContent, trace.eventPresentation(event).primary);
+    assert.equal(row.children.at(-1).className, 'eventTime');
+    app.selectedEventId = event.id;
+    app.renderDetails();
+    assert.ok(elements.get('details').textContent.includes(event.detail));
+    assert.match(elements.get('details').textContent, /Sequence:[\s\S]*QUEUE AFTER THIS EVENT:[\s\S]*Raw:/);
+  }
+});

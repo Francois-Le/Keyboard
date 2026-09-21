@@ -46,8 +46,13 @@ static Event& enqueue(EventQueue& queue, uint32_t id) {
 
 int main(int argc, char** argv) {
   EventQueue queue;
+  const Trace::LayerName names[] = {
+    {"Base"}, {"Shift"}, {"Function"}, {"Function"},
+    {"Accent"}, {"Accent"}, {"Accent 2"}, {"Accent 2"}
+  };
+  constexpr size_t initialFrames = 3 + 8;
   testMicros = 0xfffffff0;
-  Trace::begin();
+  Trace::begin(names, 8);
   assert(_SerialUSB.baud == 115200);
   Trace::service(queue);
   assert(_SerialUSB.bytes.empty());
@@ -58,10 +63,17 @@ int main(int argc, char** argv) {
   assert(_SerialUSB.calls <= 4);
   drainAll(queue);
   validateFrames();
-  assert(_SerialUSB.bytes.size() == 3 * 48);
+  assert(_SerialUSB.bytes.size() == initialFrames * 48);
   assert(_SerialUSB.bytes[4] == 1);
-  assert(_SerialUSB.bytes[48 + 4] == 6);
-  assert(_SerialUSB.bytes[96 + 4] == 8);
+  assert(_SerialUSB.bytes[44] == 8 && _SerialUSB.bytes[45] == 0);
+  for (size_t mask = 0; mask < 8; ++mask) {
+    const uint8_t* entry = _SerialUSB.bytes.data() + (mask + 1) * 48;
+    assert(entry[4] == 13 && entry[20] == mask);
+    assert(entry[21] == strlen(names[mask].text));
+    assert(memcmp(entry + 22, names[mask].text, entry[21]) == 0);
+  }
+  assert(_SerialUSB.bytes[(initialFrames - 2) * 48 + 4] == 6);
+  assert(_SerialUSB.bytes[(initialFrames - 1) * 48 + 4] == 8);
 
   testMicros = 0x20;
   Event& input = enqueue(queue, 1);
@@ -69,17 +81,17 @@ int main(int argc, char** argv) {
   Trace::decision(input, Trace::Action::DEBOUNCE_WAIT);
   drainAll(queue);
   validateFrames();
-  assert(_SerialUSB.bytes.size() == 5 * 48);
-  assert(u64(_SerialUSB.bytes.data() + 3 * 48 + 12) == 0x100000020ULL);
-  assert(u32(_SerialUSB.bytes.data() + 3 * 48 + 20) == 1);
+  assert(_SerialUSB.bytes.size() == (initialFrames + 2) * 48);
+  assert(u64(_SerialUSB.bytes.data() + initialFrames * 48 + 12) == 0x100000020ULL);
+  assert(u32(_SerialUSB.bytes.data() + initialFrames * 48 + 20) == 1);
 
   Trace::removed(input, queue.begin().m_index, Trace::Removal::PROCESSED);
   queue.popFront();
   const uint8_t report[] = {1, 4, 0, 4, 24, 0, 0, 0, 0};
   Trace::output(report + 3, report[1], 0x20, true, false, 15, 19);
   drainAll(queue);
-  assert(_SerialUSB.bytes.size() == 7 * 48);
-  const uint8_t* output = _SerialUSB.bytes.data() + 6 * 48;
+  assert(_SerialUSB.bytes.size() == (initialFrames + 4) * 48);
+  const uint8_t* output = _SerialUSB.bytes.data() + (initialFrames + 3) * 48;
   assert(output[4] == 12);
   assert(output[20] == 1 && output[21] == 0);
   assert(u32(output + 22) == 15 && u32(output + 26) == 19);
@@ -100,7 +112,7 @@ int main(int argc, char** argv) {
   drainAll(queue);
   validateFrames();
   const size_t length = _SerialUSB.bytes.size();
-  assert(_SerialUSB.bytes[length - 5 * 48 + 4] == 1);
+  assert(_SerialUSB.bytes[length - (initialFrames + 2) * 48 + 4] == 1);
   assert(_SerialUSB.bytes[length - 4 * 48 + 4] == 6);
   assert(_SerialUSB.bytes[length - 3 * 48 + 20 + 11] == 254);
   assert(_SerialUSB.bytes[length - 2 * 48 + 20 + 11] == 0);
@@ -129,6 +141,12 @@ int main(int argc, char** argv) {
   drainAll(queue);
   validateFrames();
   assert(_SerialUSB.bytes[_SerialUSB.bytes.size() - 48 + 4] == 8);
+
+  Trace::decision(queue.peek(), Trace::Action::LAYER, 0, 6);
+  drainAll(queue);
+  validateFrames();
+  assert(_SerialUSB.bytes[_SerialUSB.bytes.size() - 48 + 4] == 4);
+  assert(_SerialUSB.bytes[_SerialUSB.bytes.size() - 48 + 29] == 6);
 
   if (argc == 2) {
     std::ofstream output(argv[1], std::ios::binary);
