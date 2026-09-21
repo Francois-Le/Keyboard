@@ -36,6 +36,11 @@ ${css}
     <label><input id="filterOUTPUT" type="checkbox" checked> OUTPUT</label>
     <label><input id="followToggle" type="checkbox" checked> Follow while reading</label>
     <label>Zoom <input id="zoom" type="range" min="0.4" max="4" step="0.1" value="1"></label>
+    <label>Layout <select id="keyboardLayout">
+      <option value="en-US">English (US QWERTY)</option>
+      <option value="fr-FR">French (France AZERTY)</option>
+    </select></label>
+    <small id="layoutNotice" role="status"></small>
     <strong class="sensitivity">Capture is local; typed key data can be sensitive.</strong>
   </section>
   <section class="stats">

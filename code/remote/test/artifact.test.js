@@ -9,7 +9,9 @@ test('generated index is standalone and local-only', () => {
   assert.doesNotMatch(html, /<script[^>]+src=/i);
   assert.doesNotMatch(html, /\bfetch\s*\(/);
   assert.doesNotMatch(html, /\bimport\s*\(/);
-  assert.doesNotMatch(html, /serviceWorker|localStorage|sessionStorage/);
+  assert.doesNotMatch(html, /serviceWorker|sessionStorage/);
+  assert.match(html, /localStorage\.setItem\(LAYOUT_STORAGE_KEY, layout\)/);
+  assert.match(html, /id="keyboardLayout"/);
 });
 
 test('serial lifecycle opens at 115200 baud with DTR and no writes', () => {

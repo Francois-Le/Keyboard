@@ -269,14 +269,14 @@ test('combined keyboard and media produces exactly one readable output event', (
   assert.equal(model.events.length, 1);
   const event = model.events[0];
   assert.equal(event.kind, 'OUTPUT');
-  assert.equal(event.title, 'keys pressed: Alt, A, U');
+  assert.equal(event.title, 'Shortcut (Alt, A, U)');
   assert.match(event.detail, /Keyboard submitted \(25µs\)/);
   assert.match(event.detail, /Media submitted \(10µs\)/);
   assert.deepEqual(event.raw.keyboardReport, [1, 4, 0, 4, 24, 0, 0, 0, 0]);
   assert.deepEqual(event.raw.mediaReport, [3, 0]);
   for (const record of parser.push(output(2, [1, 0, 0, 0, 0, 0, 0, 0, 0]))) model.applyRecord(record);
   assert.equal(model.events.length, 2);
-  assert.equal(model.events[1].title, 'all keys released');
+  assert.equal(model.events[1].title, 'Released');
   assert.match(model.events[1].detail, /released Alt, 0x04, 0x18/);
 });
 
@@ -284,7 +284,7 @@ test('combined output uses descriptor media bit order and exposes partial send f
   const model = new trace.TraceModel();
   const parser = new trace.TraceParser();
   for (const record of parser.push(output(1, [1, 0, 0, 0, 0, 0, 0, 0, 0], [3, 0x29], 1, 0))) model.applyRecord(record);
-  assert.equal(model.events[0].title, 'output failed: keys pressed: Next track, Play/Pause, Volume up (requested)');
+  assert.equal(model.events[0].title, 'Failed: Next track, Play/Pause, Volume up (Next track, Play/Pause, Volume up)');
   assert.equal(model.events[0].severity, 'warn');
   assert.match(model.events[0].detail, /Media FAILED/);
   assert.equal(model.lastHidReports.has('1'), true);
@@ -309,10 +309,104 @@ test('verbose named output still round-trips capture export', () => {
   assert.equal(imported.events[0].title, model.events[0].title);
 });
 
+test('French layout labels letters, punctuation and number-row keys', () => {
+  const cases = [
+    [4, 'Q'], [20, 'A'], [26, 'Z'], [29, 'W'], [51, 'M'], [16, ','],
+    [30, '&'], [31, 'é'], [32, '"'], [33, "'"], [34, '('], [35, '-'],
+    [36, 'è'], [37, '_'], [38, 'ç'], [39, 'à'],
+    [45, ')'], [46, '='], [47, '^'], [48, '$'], [49, '*'], [50, '*'],
+    [52, 'ù'], [53, '²'], [54, ';'], [55, ':'], [56, '!'], [100, '<'],
+    [40, 'Enter'], [58, 'F1'], [89, 'Keypad 1'], [230, 'AltGr'], [250, 'HID 0xfa']
+  ];
+  for (const [usage, name] of cases) assert.equal(trace.keyName(usage, 'fr-FR'), name);
+  assert.equal(trace.keyName(4, 'en-US'), 'A');
+  assert.equal(trace.keyName(20, 'en-US'), 'Q');
+  assert.equal(trace.keyName(31, 'en-US'), '2');
+});
+
+test('layout changes relabel existing and imported output without mutating raw data', () => {
+  const model = new trace.TraceModel();
+  for (const record of new trace.TraceParser().push(output(1))) model.applyRecord(record);
+  const saved = JSON.stringify(model.serialize());
+  assert.equal(trace.eventTitle(model.events[0], 'fr-FR'), 'Shortcut (Alt, Q, U)');
+  assert.equal(trace.eventTitle(model.events[0], 'en-US'), 'Shortcut (Alt, A, U)');
+  assert.deepEqual(model.serialize().events, JSON.parse(saved).events);
+  const imported = new trace.TraceModel();
+  imported.importState(JSON.parse(saved));
+  assert.equal(trace.eventTitle(imported.events[0], 'fr-FR'), 'Shortcut (Alt, Q, U)');
+  assert.throws(() => trace.eventTitle(imported.events[0], 'unknown'), /Unsupported keyboard layout/);
+});
+
+test('French layout covers legacy reports, AltGr, media and failed outputs', () => {
+  const model = new trace.TraceModel();
+  const parser = new trace.TraceParser();
+  for (const record of parser.push(hid(1, [1, 64, 0, 20, 51, 31, 0, 0, 0]))) model.applyRecord(record);
+  assert.equal(trace.eventTitle(model.events[0], 'fr-FR'), 'Unmapped, Unmapped, Dead ~ (AltGr, A, M, é)');
+  for (const record of parser.push(output(2, [1, 0, 0, 4, 0, 0, 0, 0, 0], [3, 32], 0, 1))) model.applyRecord(record);
+  assert.equal(trace.eventTitle(model.events[1], 'fr-FR'), 'Failed: q, Volume up (Q, Volume up)');
+  assert.equal(trace.eventTitle({ kind: 'INPUT', title: 'press row 1 column 1' }, 'fr-FR'), 'press row 1 column 1');
+  assert.equal(trace.eventTitle({ kind: 'OUTPUT', title: 'old capture', raw: { type: 12 } }, 'fr-FR'), 'old capture');
+});
+
 test('import is atomic and validates unsafe data', () => {
   const model = new trace.TraceModel();
   model.addIssue('before', null);
   assert.throws(() => model.importState({ format: 'KBT_TRACE_MODEL_V1', queue: [{ id: 1, slot: 0 }], events: [{ id: 1, kind: 'NOPE' }] }));
   assert.equal(model.events.length, 1);
   assert.equal(model.events[0].detail, 'before');
+});
+
+function translated(layout, modifiers, code, success = 1, legacy = false) {
+  const model = new trace.TraceModel();
+  const report = [1, modifiers, 0, code, 0, 0, 0, 0, 0];
+  const bytes = legacy ? hid(1, report, success) : output(1, report, [3, 0], success);
+  for (const record of new trace.TraceParser().push(bytes)) model.applyRecord(record);
+  return trace.eventPresentation(model.events[0], layout);
+}
+
+test('French AltGr apostrophe gives the requested short presentation', () => {
+  assert.deepEqual(translated('fr-FR', 64, 33), { primary: '{', combination: "(AltGr, ')" });
+  assert.deepEqual(translated('fr-FR', 64, 33, 1, true), { primary: '{', combination: "(AltGr, ')" });
+  assert.equal(translated('fr-FR', 65, 33).primary, '{');
+  assert.equal(translated('fr-FR', 5, 33).primary, '{');
+  assert.equal(translated('fr-FR', 64, 33, 0).primary, 'Failed: {');
+});
+
+test('French AltGr symbols and dead keys follow the selected modifier level', () => {
+  for (const [usage, expected] of [
+    [8, '€'], [31, 'Dead ~'], [32, '#'], [33, '{'], [34, '['], [35, '|'],
+    [36, 'Dead `'], [37, '\\'], [38, '^'], [39, '@'], [45, ']'], [46, '}'], [48, '¤']
+  ]) assert.equal(translated('fr-FR', 64, usage).primary, expected);
+  assert.equal(translated('fr-FR', 0, 47).primary, 'Dead ^');
+  assert.equal(translated('fr-FR', 2, 47).primary, 'Dead ¨');
+  assert.equal(translated('fr-FR', 64, 4).primary, 'Unmapped');
+  assert.equal(translated('fr-FR', 66, 33).primary, 'Unmapped');
+});
+
+test('Shift maps US and French numbers, symbols and letter case', () => {
+  for (const [usage, us, fr] of [
+    [30, '!', '1'], [31, '@', '2'], [32, '#', '3'], [33, '$', '4'], [34, '%', '5'],
+    [35, '^', '6'], [36, '&', '7'], [37, '*', '8'], [38, '(', '9'], [39, ')', '0'],
+    [45, '_', '°'], [46, '+', '+'], [48, '}', '£'], [52, '"', '%'], [55, '>', '/']
+  ]) {
+    assert.equal(translated('en-US', 2, usage).primary, us);
+    assert.equal(translated('fr-FR', 32, usage).primary, fr);
+  }
+  assert.deepEqual(translated('fr-FR', 0, 20), { primary: 'a', combination: '(A)' });
+  assert.deepEqual(translated('fr-FR', 2, 20), { primary: 'A', combination: '(Shift, A)' });
+  assert.equal(translated('fr-FR', 0, 51).primary, 'm');
+  assert.equal(translated('fr-FR', 2, 16).primary, '?');
+  assert.equal(translated('en-US', 0, 4).primary, 'a');
+  assert.equal(translated('en-US', 2, 47).primary, '{');
+});
+
+test('shortcut, modifier, release and named-key rows do not claim typed text', () => {
+  assert.equal(translated('en-US', 64, 33).primary, 'Shortcut');
+  assert.equal(translated('fr-FR', 1, 6).primary, 'Shortcut');
+  assert.equal(translated('fr-FR', 8, 6).primary, 'Shortcut');
+  assert.equal(translated('fr-FR', 64, 0).primary, 'Modifier');
+  assert.deepEqual(translated('fr-FR', 0, 0), { primary: 'Released', combination: '' });
+  assert.equal(translated('fr-FR', 0, 40).primary, 'Enter');
+  assert.equal(translated('fr-FR', 0, 89).primary, 'Keypad 1');
+  assert.equal(translated('en-US', 0, 250).primary, 'HID 0xfa');
 });

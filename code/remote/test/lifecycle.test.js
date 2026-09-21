@@ -157,6 +157,7 @@ for (const mode of ['EOF', 'error']) {
         if (mode === 'EOF') controller.close();
         else controller.error(new Error('unplug'));
       }
+
     });
     const port = {
       readable: stream,
@@ -174,3 +175,55 @@ for (const mode of ['EOF', 'error']) {
     if (mode === 'error') assert.match(elements.get('status').textContent, /unplug/);
   });
 }
+
+test('layout preference persists, relabels capture export and restores on startup', () => {
+  const { elements } = installDom();
+  globalThis.KBTTrace = trace;
+  const { SerialTraceApp, demoFrames } = require('../src/app.js');
+  const storage = new Map();
+  Object.defineProperty(globalThis, 'window', {
+    value: { localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } },
+    configurable: true
+  });
+  const app = new SerialTraceApp();
+  app.restoreLayout();
+  assert.equal(app.keyboardLayout, 'en-US');
+  for (const bytes of demoFrames()) for (const record of app.parser.push(bytes)) app.model.applyRecord(record);
+  app.setKeyboardLayout('fr-FR');
+  assert.equal(elements.get('keyboardLayout').value, 'fr-FR');
+  assert.equal(app.captureExport().displayLayout, 'fr-FR');
+  assert.equal(app.captureExport().events.find(event => event.kind === 'OUTPUT').title, "{ (AltGr, ')");
+  const restored = new SerialTraceApp();
+  restored.restoreLayout();
+  assert.equal(restored.keyboardLayout, 'fr-FR');
+});
+
+test('blocked storage does not prevent layout selection and shows a notice', () => {
+  const { elements } = installDom();
+  const { SerialTraceApp } = require('../src/app.js');
+  const window = {};
+  Object.defineProperty(window, 'localStorage', { get() { throw new Error('blocked'); } });
+  Object.defineProperty(globalThis, 'window', { value: window, configurable: true });
+  const app = new SerialTraceApp();
+  app.restoreLayout();
+  app.setKeyboardLayout('fr-FR');
+  assert.equal(app.keyboardLayout, 'fr-FR');
+  assert.match(elements.get('layoutNotice').textContent, /session-only/);
+});
+
+test('output renders translation and combination as separate styled text spans', () => {
+  installDom();
+  globalThis.KBTTrace = trace;
+  const { SerialTraceApp, demoFrames } = require('../src/app.js');
+  const app = new SerialTraceApp();
+  app.keyboardLayout = 'fr-FR';
+  for (const bytes of demoFrames()) for (const record of app.parser.push(bytes)) app.model.applyRecord(record);
+  const event = app.model.events.find(event => event.kind === 'OUTPUT');
+  const row = app.renderEvent(event, null);
+  const main = row.children.find(child => child.className === 'eventMain');
+  assert.equal(main.children[0].textContent, '{');
+  assert.equal(main.children[1].className, 'keyCombination');
+  assert.equal(main.children[1].textContent, " (AltGr, ')");
+  assert.equal(main.children.length, 2);
+  assert.match(row.title, /\{ \(AltGr, '\)/);
+});

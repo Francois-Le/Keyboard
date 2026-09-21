@@ -7,6 +7,7 @@
   const KIND_FILTERS = ['INPUT', 'INTERNAL', 'OUTPUT'];
   const MAX_RENDERED_EVENTS = 300;
   const RENDER_INTERVAL_MS = 50;
+  const LAYOUT_STORAGE_KEY = 'keyboard-trace.layout';
 
   function $(id) {
     return document.getElementById(id);
@@ -60,7 +61,7 @@
     frames.push(makeFrame(4, seq++, 1043000, p => { p.setUint32(0, 100, true); p.setUint32(4, 0, true); p.setUint8(8, 8); p.setUint8(9, 1); p.setUint8(10, 0); }));
     frames.push(makeFrame(12, seq++, 1043800, (p, b) => {
       p.setUint8(0, 1); p.setUint8(1, 1); p.setUint32(2, 420, true); p.setUint32(6, 80, true);
-      b.set([1, 4, 0, 4, 24, 0, 0, 0, 0, 3, 0], 30);
+      b.set([1, 64, 0, 33, 0, 0, 0, 0, 0, 3, 0], 30);
     }));
     frames.push(makeFrame(3, seq++, 1044200, p => { p.setUint32(0, 100, true); p.setUint8(4, 1); p.setUint8(5, 0); }));
     frames.push(makeFrame(2, seq++, 1180000, p => { p.setUint32(0, 101, true); p.setUint32(4, 1180000, true); p.setUint8(8, 3); p.setUint8(9, 1); p.setUint8(10, 1); p.setUint8(11, 1); }));
@@ -92,9 +93,11 @@
       this.zoom = 1;
       this.renderQueued = false;
       this.lastRenderAt = 0;
+      this.keyboardLayout = 'en-US';
     }
 
     start() {
+      this.restoreLayout();
       this.bindUi();
       this.render();
       this.setStatus(this.capabilityMessage(), 'idle');
@@ -105,16 +108,55 @@
       $('disconnectBtn').addEventListener('click', () => this.disconnect());
       $('demoBtn').addEventListener('click', () => this.runDemo());
       $('clearBtn').addEventListener('click', () => { this.model.clearVisible(); this.selectedEventId = null; this.render(); });
-      $('exportBtn').addEventListener('click', () => downloadText(`keyboard-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.json`, JSON.stringify(this.model.serialize(), null, 2)));
+      $('exportBtn').addEventListener('click', () => downloadText(`keyboard-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.json`, JSON.stringify(this.captureExport(), null, 2)));
       $('importInput').addEventListener('change', event => this.importFile(event.target.files[0]));
       $('followToggle').addEventListener('change', event => { this.follow = event.target.checked; });
       $('zoom').addEventListener('input', event => { this.zoom = Number(event.target.value); this.render(); });
+      $('keyboardLayout').addEventListener('change', event => this.setKeyboardLayout(event.target.value));
       for (const kind of KIND_FILTERS) {
         $(`filter${kind}`).addEventListener('change', event => {
           if (event.target.checked) this.filters.add(kind); else this.filters.delete(kind);
           this.render();
         });
       }
+    }
+
+    restoreLayout() {
+      try {
+        const saved = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+        if (saved !== null) {
+          if (Object.hasOwn(trace.KEYBOARD_LAYOUTS, saved)) this.keyboardLayout = saved;
+          else $('layoutNotice').textContent = 'Unknown saved layout; using English.';
+        }
+      } catch (error) {
+        $('layoutNotice').textContent = 'Layout preference is session-only.';
+        $('layoutNotice').title = `Browser storage unavailable: ${error.message}`;
+      }
+      $('keyboardLayout').value = this.keyboardLayout;
+    }
+
+    setKeyboardLayout(layout) {
+      if (!Object.hasOwn(trace.KEYBOARD_LAYOUTS, layout)) throw new Error(`Unsupported keyboard layout: ${layout}`);
+      this.keyboardLayout = layout;
+      $('keyboardLayout').value = layout;
+      try {
+        window.localStorage.setItem(LAYOUT_STORAGE_KEY, layout);
+        $('layoutNotice').textContent = '';
+        $('layoutNotice').title = '';
+      } catch (error) {
+        $('layoutNotice').textContent = 'Layout preference is session-only.';
+        $('layoutNotice').title = `Could not save layout: ${error.message}`;
+      }
+      const scrollTop = $('timeline').scrollTop;
+      this.render();
+      $('timeline').scrollTop = scrollTop;
+    }
+
+    captureExport() {
+      const capture = this.model.serialize();
+      capture.displayLayout = this.keyboardLayout;
+      capture.events = capture.events.map(event => ({ ...event, title: trace.eventTitle(event, this.keyboardLayout) }));
+      return capture;
     }
 
     capabilityMessage() {
@@ -369,13 +411,21 @@
       const main = document.createElement('span');
       main.className = 'eventMain';
       const title = document.createElement('strong');
-      title.textContent = event.title;
+      const presentation = trace.eventPresentation(event, this.keyboardLayout);
+      const displayTitle = trace.eventTitle(event, this.keyboardLayout);
+      title.textContent = presentation.primary;
       if (compact) {
         main.append(title);
+        if (presentation.combination) {
+          const combination = document.createElement('span');
+          combination.className = 'keyCombination';
+          combination.textContent = ` ${presentation.combination}`;
+          main.append(combination);
+        }
         const time = document.createElement('small');
         time.className = 'eventTime';
         time.textContent = formatMicros(event.timestampMicros);
-        row.title = `${event.title}\nseq ${event.sequence ?? '—'}, visible delta ${formatMicros(visibleDeltaUs)}${desiredGap > 110 ? ' (gap compressed)' : ''}\nClick for full details`;
+        row.title = `${displayTitle}\nseq ${event.sequence ?? '—'}, visible delta ${formatMicros(visibleDeltaUs)}${desiredGap > 110 ? ' (gap compressed)' : ''}\nClick for full details`;
         row.append(lane, main, time);
         return row;
       }
@@ -398,9 +448,11 @@
       const queue = selected.queueKnown
         ? (selected.queueAfter.length ? selected.queueAfter.map(q => `slot ${q.slot}: #${q.id} row ${q.row + 1} column ${q.col + 1} ${q.pressed ? 'down' : 'up'}`).join('\n') : '(empty)')
         : 'Unknown until a complete SNAPSHOT_BEGIN/ENTRY*/SNAPSHOT_END checkpoint.';
-      panel.textContent = `${selected.kind} · ${selected.title}
+      panel.textContent = `${selected.kind} · ${trace.eventTitle(selected, this.keyboardLayout)}
 ${selected.detail}
 
+Display layout: ${trace.KEYBOARD_LAYOUTS[this.keyboardLayout]}
+Character preview assumes Caps Lock off; dead-key/IME composition and host receipt are not inferred.
 Sequence: ${selected.sequence ?? '—'}
 Timestamp: ${formatMicros(selected.timestampMicros)}
 Delta: ${formatMicros(selected.deltaUs)}

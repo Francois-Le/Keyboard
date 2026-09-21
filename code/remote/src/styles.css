@@ -47,7 +47,7 @@ h1 { margin: 0 0 6px; font-size: 24px; }
 .filters { padding: 0 28px 14px; background: rgba(22, 27, 34, 0.8); border-bottom: 1px solid var(--border); }
 .stats { padding: 10px 28px; color: var(--muted); border-bottom: 1px solid var(--border); gap: 22px; }
 
-button, .fileButton {
+button, .fileButton, select {
   border: 1px solid var(--border);
   background: var(--panel2);
   color: var(--text);
@@ -55,7 +55,9 @@ button, .fileButton {
   padding: 8px 12px;
   cursor: pointer;
 }
-button:hover, .fileButton:hover { border-color: #58a6ff; }
+button:hover, .fileButton:hover, select:hover { border-color: #58a6ff; }
+select { max-width: 100%; font: inherit; padding: 4px 6px; }
+#layoutNotice { color: var(--warn); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 .fileButton.disabled { opacity: 0.5; pointer-events: none; }
 input[type="file"] { display: none; }
@@ -146,12 +148,14 @@ main {
 }
 .event.compact::before { top: calc(50% - 6px); }
 .compact .lane { align-self: center; }
-.compact .eventMain, .compact strong {
+.compact .eventMain {
   display: block;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.compact strong { display: inline; }
+.keyCombination { color: var(--muted); font-weight: normal; }
 .eventTime { color: var(--muted); white-space: nowrap; }
 .compressedGap {
   grid-column: 1 / -1;

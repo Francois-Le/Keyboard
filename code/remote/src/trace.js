@@ -46,6 +46,36 @@
   const MAX_ISSUES = 200;
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   const KEYBOARD_MODIFIERS = ['Ctrl', 'Shift', 'Alt', 'Win', 'Right Ctrl', 'Right Shift', 'Right Alt', 'Right Win'];
+  const KEYBOARD_LAYOUTS = {
+    'en-US': 'English (US QWERTY)',
+    'fr-FR': 'French (France AZERTY)'
+  };
+  const FRENCH_KEYS = {
+    4: 'Q', 16: ',', 20: 'A', 26: 'Z', 29: 'W',
+    30: '&', 31: 'é', 32: '"', 33: "'", 34: '(', 35: '-',
+    36: 'è', 37: '_', 38: 'ç', 39: 'à',
+    45: ')', 46: '=', 47: '^', 48: '$', 49: '*', 50: '*',
+    51: 'M', 52: 'ù', 53: '²', 54: ';', 55: ':', 56: '!', 100: '<'
+  };
+  const SHIFTED_KEYS = {
+    'en-US': {
+      30: '!', 31: '@', 32: '#', 33: '$', 34: '%', 35: '^',
+      36: '&', 37: '*', 38: '(', 39: ')',
+      45: '_', 46: '+', 47: '{', 48: '}', 49: '|', 50: '~',
+      51: ':', 52: '"', 53: '~', 54: '<', 55: '>', 56: '?', 100: '|'
+    },
+    'fr-FR': {
+      16: '?', 30: '1', 31: '2', 32: '3', 33: '4', 34: '5',
+      35: '6', 36: '7', 37: '8', 38: '9', 39: '0',
+      45: '°', 46: '+', 47: 'Dead ¨', 48: '£', 49: 'µ', 50: 'µ',
+      52: '%', 53: 'Unmapped', 54: '.', 55: '/', 56: '§', 100: '>'
+    }
+  };
+  // Traditional Windows French AZERTY: Ctrl+Alt selects the AltGr level.
+  const FRENCH_ALTGR = {
+    8: '€', 31: 'Dead ~', 32: '#', 33: '{', 34: '[', 35: '|',
+    36: 'Dead `', 37: '\\', 38: '^', 39: '@', 45: ']', 46: '}', 48: '¤'
+  };
   const MEDIA_BITS = ['Next track', 'Previous track', 'Stop', 'Play/Pause', 'Mute', 'Volume up', 'Volume down', 'Unknown media bit 7'];
   const KEY_NAMES = {
     1: 'Rollover error', 2: 'POST error', 3: 'Undefined error',
@@ -60,7 +90,9 @@
     101: 'Menu', 102: 'Power', 103: 'Keypad ='
   };
 
-  function keyName(code) {
+  function keyName(code, layout = 'en-US') {
+    if (layout === 'fr-FR' && Object.hasOwn(FRENCH_KEYS, code)) return FRENCH_KEYS[code];
+    if (layout === 'fr-FR' && code === 230) return 'AltGr';
     if (code >= 4 && code <= 29) return String.fromCharCode(65 + code - 4);
     if (code >= 30 && code <= 39) return String((code - 29) % 10);
     if (code >= 58 && code <= 69) return `F${code - 57}`;
@@ -70,18 +102,73 @@
     return KEY_NAMES[code] || `HID 0x${code.toString(16).padStart(2, '0')}`;
   }
 
-  function reportKeys(report) {
+  function reportKeys(report, layout = 'en-US') {
     if (report[0] === 3) return MEDIA_BITS.filter((_, bit) => (report[1] & (1 << bit)) !== 0);
     return [
-      ...KEYBOARD_MODIFIERS.filter((_, bit) => (report[1] & (1 << bit)) !== 0),
-      ...new Set(report.slice(3, 9).filter(Boolean).map(keyName))
+      ...KEYBOARD_MODIFIERS.flatMap((name, bit) => (report[1] & (1 << bit)) ? [layout === 'fr-FR' && bit === 6 ? 'AltGr' : name] : []),
+      ...new Set(report.slice(3, 9).filter(Boolean).map(code => keyName(code, layout)))
     ];
   }
 
-  function outputTitle(reports, success) {
-    const keys = reports.flatMap(reportKeys);
-    const state = keys.length ? `keys pressed: ${keys.join(', ')}` : 'all keys released';
-    return success ? state : `output failed: ${state} (requested)`;
+  function translatedKeys(report, layout) {
+    if (report[0] === 3) return reportKeys(report, layout);
+    const modifiers = report[1];
+    const codes = [...new Set(report.slice(3, 9).filter(Boolean))];
+    if (!codes.length) return modifiers ? ['Modifier'] : [];
+    const shift = (modifiers & 0x22) !== 0;
+    const control = (modifiers & 0x11) !== 0;
+    const alt = (modifiers & 0x44) !== 0;
+    const altGr = layout === 'fr-FR' && ((modifiers & 0x40) !== 0 || (control && alt));
+    if ((modifiers & 0x88) || ((control || alt) && !altGr)) return ['Shortcut'];
+    return codes.map(code => {
+      const label = keyName(code, layout);
+      // Named keys are actions, not character predictions (including keypad locks).
+      const printable = /^[A-Z]$/.test(label) || label.length === 1;
+      if (!printable) return label;
+      if (altGr) return shift ? 'Unmapped' : (FRENCH_ALTGR[code] || 'Unmapped');
+      if (/^[A-Z]$/.test(label)) return shift ? label : label.toLowerCase();
+      if (shift && Object.hasOwn(SHIFTED_KEYS[layout], code)) return SHIFTED_KEYS[layout][code];
+      if (layout === 'fr-FR' && code === 47) return 'Dead ^';
+      return label;
+    });
+  }
+
+  function outputPresentation(reports, success, layout = 'en-US') {
+    const result = reports.flatMap(report => translatedKeys(report, layout)).join(', ') || 'Released';
+    const keys = reports.flatMap(report => reportKeys(report, layout)).join(', ');
+    return {
+      primary: success ? result : `Failed: ${result}`,
+      combination: keys ? `(${keys})` : ''
+    };
+  }
+
+  function presentationTitle(presentation) {
+    return presentation.primary + (presentation.combination ? ` ${presentation.combination}` : '');
+  }
+
+  function outputTitle(reports, success, layout = 'en-US') {
+    return presentationTitle(outputPresentation(reports, success, layout));
+  }
+
+  function eventPresentation(event, layout = 'en-US') {
+    if (!Object.hasOwn(KEYBOARD_LAYOUTS, layout)) throw new Error(`Unsupported keyboard layout: ${layout}`);
+    const raw = event.raw;
+    const fallback = { primary: event.title, combination: '' };
+    if (event.kind !== OUTPUT || !raw) return fallback;
+    // Imported captures may not contain valid raw reports; retain their saved title.
+    const validReport = (report, id, length) => Array.isArray(report) && report.length === length &&
+      report[0] === id && report.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255);
+    if (raw.type === 12 && validReport(raw.keyboardReport, 1, 9) && validReport(raw.mediaReport, 3, 2)) {
+      return outputPresentation([raw.keyboardReport, raw.mediaReport], raw.keyboardSuccessRaw === 1 && raw.mediaSuccessRaw === 1, layout);
+    }
+    if (raw.type === 5 && (validReport(raw.report, 1, 9) || validReport(raw.report, 3, 2))) {
+      return outputPresentation([raw.report], raw.success === true, layout);
+    }
+    return fallback;
+  }
+
+  function eventTitle(event, layout = 'en-US') {
+    return presentationTitle(eventPresentation(event, layout));
   }
 
   function crc16CcittFalse(bytes, start = 0, end = bytes.length) {
@@ -863,6 +950,10 @@
     REMOVE_REASONS,
     ACTIONS,
     MAX_IMPORT_BYTES,
+    KEYBOARD_LAYOUTS,
+    keyName,
+    eventTitle,
+    eventPresentation,
     TraceParser,
     TraceModel,
     crc16CcittFalse
