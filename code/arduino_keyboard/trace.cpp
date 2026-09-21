@@ -21,7 +21,7 @@ uint8_t waitAction = 0;
 
 enum class Type : uint8_t {
   HELLO = 1, INPUT, REMOVE, DECISION, HID,
-  SNAPSHOT_BEGIN, SNAPSHOT_ENTRY, SNAPSHOT_END, LOSS, I2C_RESET, QUEUE_OVERFLOW
+  SNAPSHOT_BEGIN, SNAPSHOT_ENTRY, SNAPSHOT_END, LOSS, I2C_RESET, QUEUE_OVERFLOW, HID_OUTPUT
 };
 
 uint64_t now() {
@@ -198,6 +198,21 @@ void Trace::hid(const uint8_t* report, uint8_t length, bool success, uint32_t du
   put32(payload + 2, duration);
   memcpy(payload + 6, report, length);
   emit(Type::HID, payload, now());
+}
+
+void Trace::output(const uint8_t* keys, uint8_t modifiers, uint8_t media, bool keyboardSuccess, bool mediaSuccess, uint32_t keyboardDuration, uint32_t mediaDuration) {
+  if (!connected) return;
+  uint8_t payload[26] = {};
+  payload[0] = keyboardSuccess;
+  payload[1] = mediaSuccess;
+  put32(payload + 2, keyboardDuration);
+  put32(payload + 6, mediaDuration);
+  payload[10] = 1;  // Keyboard report ID.
+  payload[11] = modifiers;
+  memcpy(payload + 13, keys, 6);
+  payload[19] = 3;  // Media report ID.
+  payload[20] = media;
+  emit(Type::HID_OUTPUT, payload, now());
 }
 
 void Trace::i2cReset(uint8_t chip) {

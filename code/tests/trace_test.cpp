@@ -75,11 +75,16 @@ int main(int argc, char** argv) {
 
   Trace::removed(input, queue.begin().m_index, Trace::Removal::PROCESSED);
   queue.popFront();
-  const uint8_t report[] = {1, 2, 0, 4, 0, 0, 0, 0, 0};
-  Trace::hid(report, sizeof(report), true, 15);
+  const uint8_t report[] = {1, 4, 0, 4, 24, 0, 0, 0, 0};
+  Trace::output(report + 3, report[1], 0x20, true, false, 15, 19);
   drainAll(queue);
-  assert(_SerialUSB.bytes[6 * 48 + 4] == 5);
-  assert(memcmp(_SerialUSB.bytes.data() + 6 * 48 + 26, report, sizeof(report)) == 0);
+  assert(_SerialUSB.bytes.size() == 7 * 48);
+  const uint8_t* output = _SerialUSB.bytes.data() + 6 * 48;
+  assert(output[4] == 12);
+  assert(output[20] == 1 && output[21] == 0);
+  assert(u32(output + 22) == 15 && u32(output + 26) == 19);
+  assert(memcmp(output + 30, report, sizeof(report)) == 0);
+  assert(output[39] == 3 && output[40] == 0x20);
 
   // Force physical slot wrap and a tombstone without altering the trace queue.
   for (int i = 1; i < 254; ++i) {

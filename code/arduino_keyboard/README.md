@@ -27,7 +27,9 @@ the Mbed core reserves for entering the bootloader.
   queue removal, layer masks, I2C recovery attempts and exact HID reports.
 - Input timestamps describe software observations, not exact electrical edges.
   HID success is the return value of the USB submission API, not proof that the
-  OS/application received a key. Each HID frame includes send duration.
+  OS/application received a key. A single `HID_OUTPUT` trace frame combines the
+  keyboard and media reports, keeping both submission results and durations.
+  The actual two USB HID reports are unchanged.
 - A 24 KiB, fixed-size ring decouples instrumentation from USB. The loop makes
   at most four nonblocking `send_nb()` attempts per service call, preserving
   partially sent frames. It never waits for a debugger or a slow reader.

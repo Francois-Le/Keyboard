@@ -21,9 +21,14 @@
 }
 
 * { box-sizing: border-box; }
+html { height: 100%; overflow: hidden; }
 body {
   margin: 0;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  overflow: hidden;
   background: radial-gradient(circle at 20% 0%, #1b2a4a 0, transparent 35%), var(--bg);
   color: var(--text);
   font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
@@ -76,14 +81,17 @@ label { color: var(--muted); }
 
 main {
   display: grid;
-  grid-template-columns: minmax(420px, 1fr) minmax(320px, 420px);
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
   gap: 18px;
   padding: 18px 28px 28px;
-  height: calc(100vh - 215px);
-  min-height: 520px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .timeline {
+  min-height: 0;
+  min-width: 0;
   overflow: auto;
   padding: 18px 18px 70px 38px;
   border: 1px solid var(--border);
@@ -103,7 +111,7 @@ main {
 
 .event {
   display: grid;
-  grid-template-columns: 92px 1fr;
+  grid-template-columns: 72px minmax(0, 1fr);
   width: 100%;
   text-align: left;
   position: relative;
@@ -135,8 +143,23 @@ main {
   font-weight: 800;
   letter-spacing: 0.08em;
 }
-.eventMain { display: grid; gap: 3px; color: var(--text); }
+.eventMain { display: grid; gap: 3px; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
 .eventMain small { color: var(--muted); }
+.event.compact {
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.event.compact::before { top: calc(50% - 6px); }
+.compact .lane { align-self: center; }
+.compact .eventMain, .compact strong {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.eventTime { color: var(--muted); white-space: nowrap; }
 .compressedGap {
   grid-column: 1 / -1;
   margin-bottom: 8px;
@@ -150,6 +173,7 @@ main {
 
 .sidePanel {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -157,6 +181,7 @@ main {
 .sidePanel h2 { margin: 0; }
 pre {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   white-space: pre-wrap;
   margin: 0;
@@ -170,8 +195,30 @@ pre {
 .sensitivity { color: #ffd8a8; }
 
 @media (max-width: 900px) {
-  main { grid-template-columns: 1fr; height: auto; }
-  .timeline, pre { min-height: 420px; }
+  main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; padding: 10px; }
+}
+
+@media (max-width: 600px), (max-height: 650px) {
+  header { padding: 8px 12px; }
+  h1 { font-size: 19px; }
+  .subtitle { display: none; }
+  .toolbar, .filters, .stats { padding: 6px 12px; gap: 6px; }
+  button, .fileButton { padding: 6px 8px; }
+  .sensitivity { font-size: 11px; }
+  .status { flex-basis: 100%; padding: 4px 8px; }
+  .timeline { padding: 10px 8px 20px 30px; }
+  .timeline::before { left: 18px; }
+  .event::before { left: -18px; }
+  .event.compact { grid-template-columns: 50px minmax(0, 1fr) auto; gap: 4px; }
+  .lane { font-size: 10px; }
+}
+
+@media (min-width: 600px) and (max-height: 500px) {
+  main {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .sidePanel h2 { font-size: 16px; }
 }
 
   </style>
@@ -232,7 +279,8 @@ pre {
     8: 'SNAPSHOT_END',
     9: 'LOSS',
     10: 'I2C_RESET',
-    11: 'QUEUE_OVERFLOW'
+    11: 'QUEUE_OVERFLOW',
+    12: 'HID_OUTPUT'
   };
   const INPUT = 'INPUT';
   const INTERNAL = 'INTERNAL';
@@ -257,8 +305,44 @@ pre {
   const MAX_QUEUE_ENTRIES = 255;
   const MAX_ISSUES = 200;
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
-  const KEYBOARD_MODIFIERS = ['LCTRL', 'LSHIFT', 'LALT', 'LGUI', 'RCTRL', 'RSHIFT', 'RALT', 'RGUI'];
-  const MEDIA_BITS = ['PLAY_PAUSE', 'SCAN_NEXT', 'SCAN_PREV', 'STOP', 'MUTE', 'VOLUME_UP', 'VOLUME_DOWN', 'EJECT'];
+  const KEYBOARD_MODIFIERS = ['Ctrl', 'Shift', 'Alt', 'Win', 'Right Ctrl', 'Right Shift', 'Right Alt', 'Right Win'];
+  const MEDIA_BITS = ['Next track', 'Previous track', 'Stop', 'Play/Pause', 'Mute', 'Volume up', 'Volume down', 'Unknown media bit 7'];
+  const KEY_NAMES = {
+    1: 'Rollover error', 2: 'POST error', 3: 'Undefined error',
+    40: 'Enter', 41: 'Escape', 42: 'Backspace', 43: 'Tab', 44: 'Space',
+    45: '-', 46: '=', 47: '[', 48: ']', 49: '\\', 50: '#', 51: ';',
+    52: "'", 53: '`', 54: ',', 55: '.', 56: '/', 57: 'Caps Lock',
+    70: 'Print Screen', 71: 'Scroll Lock', 72: 'Pause', 73: 'Insert',
+    74: 'Home', 75: 'Page Up', 76: 'Delete', 77: 'End', 78: 'Page Down',
+    79: 'Right', 80: 'Left', 81: 'Down', 82: 'Up', 83: 'Num Lock',
+    84: 'Keypad /', 85: 'Keypad *', 86: 'Keypad -', 87: 'Keypad +',
+    88: 'Keypad Enter', 98: 'Keypad 0', 99: 'Keypad .', 100: 'Non-US \\',
+    101: 'Menu', 102: 'Power', 103: 'Keypad ='
+  };
+
+  function keyName(code) {
+    if (code >= 4 && code <= 29) return String.fromCharCode(65 + code - 4);
+    if (code >= 30 && code <= 39) return String((code - 29) % 10);
+    if (code >= 58 && code <= 69) return `F${code - 57}`;
+    if (code >= 104 && code <= 115) return `F${code - 91}`;
+    if (code >= 89 && code <= 97) return `Keypad ${code - 88}`;
+    if (code >= 224 && code <= 231) return KEYBOARD_MODIFIERS[code - 224];
+    return KEY_NAMES[code] || `HID 0x${code.toString(16).padStart(2, '0')}`;
+  }
+
+  function reportKeys(report) {
+    if (report[0] === 3) return MEDIA_BITS.filter((_, bit) => (report[1] & (1 << bit)) !== 0);
+    return [
+      ...KEYBOARD_MODIFIERS.filter((_, bit) => (report[1] & (1 << bit)) !== 0),
+      ...new Set(report.slice(3, 9).filter(Boolean).map(keyName))
+    ];
+  }
+
+  function outputTitle(reports, success) {
+    const keys = reports.flatMap(reportKeys);
+    const state = keys.length ? `keys pressed: ${keys.join(', ')}` : 'all keys released';
+    return success ? state : `output failed: ${state} (requested)`;
+  }
 
   function crc16CcittFalse(bytes, start = 0, end = bytes.length) {
     let crc = 0xffff;
@@ -459,6 +543,14 @@ pre {
         frame.head = payload.getUint8(0);
         frame.tail = payload.getUint8(1);
         break;
+      case 12:
+        frame.keyboardSuccessRaw = payload.getUint8(0);
+        frame.mediaSuccessRaw = payload.getUint8(1);
+        frame.keyboardDurationUs = readU32(payload, 2);
+        frame.mediaDurationUs = readU32(payload, 6);
+        frame.keyboardReport = Array.from(bytes.slice(30, 39));
+        frame.mediaReport = Array.from(bytes.slice(39, 41));
+        break;
     }
     return frame;
   }
@@ -563,6 +655,9 @@ pre {
         case 5:
           generated.push(this.handleHid(frame));
           break;
+        case 12:
+          generated.push(this.handleOutput(frame));
+          break;
         case 6:
           generated.push(this.handleSnapshotBegin(frame));
           break;
@@ -633,7 +728,7 @@ pre {
         }
         this.queue.push(item);
       }
-      return this.addEvent(INPUT, frame.pressed ? 'Key press enqueued' : 'Key release enqueued', `id ${frame.id}, row ${frame.row}, col ${frame.col}, slot ${frame.slot}, sampled ${frame.sampleMicros32}µs.`, frame);
+      return this.addEvent(INPUT, `${frame.pressed ? 'press' : 'release'} row ${frame.row + 1} column ${frame.col + 1}`, `id ${frame.id}, raw row ${frame.row}, col ${frame.col} (zero-based), slot ${frame.slot}, sampled ${frame.sampleMicros32}µs.`, frame);
     }
 
     handleRemove(frame) {
@@ -662,7 +757,17 @@ pre {
       const validLength = (frame.reportLength === 9 && frame.report[0] === 1) || (frame.reportLength === 2 && frame.report[0] === 3);
       const bytes = frame.report.map(b => b.toString(16).padStart(2, '0')).join(' ');
       const interpreted = validLength ? this.describeHid(frame) : 'Invalid report ID/length (keyboard requires ID 1 length 9; media requires ID 3 length 2).';
-      return this.addEvent(OUTPUT, frame.success ? 'HID send submitted' : 'HID send failed', `${interpreted} length ${frame.reportLength}, duration ${frame.sendDurationUs}µs, bytes [${bytes}]. API submission does not prove host receipt.`, frame, { severity: frame.success && validLength ? 'info' : 'warn' });
+      return this.addEvent(OUTPUT, outputTitle([frame.report], frame.success), `${interpreted} length ${frame.reportLength}, duration ${frame.sendDurationUs}µs, bytes [${bytes}]. API submission does not prove host receipt.`, frame, { severity: frame.success && validLength ? 'info' : 'warn' });
+    }
+
+    handleOutput(frame) {
+      const keyboardSuccess = frame.keyboardSuccessRaw === 1;
+      const mediaSuccess = frame.mediaSuccessRaw === 1;
+      const keyboard = this.describeHid({ report: frame.keyboardReport, success: keyboardSuccess });
+      const media = this.describeHid({ report: frame.mediaReport, success: mediaSuccess });
+      return this.addEvent(OUTPUT, outputTitle([frame.keyboardReport, frame.mediaReport], keyboardSuccess && mediaSuccess),
+        `Keyboard ${keyboardSuccess ? 'submitted' : 'FAILED'} (${frame.keyboardDurationUs}µs): ${keyboard}\nMedia ${mediaSuccess ? 'submitted' : 'FAILED'} (${frame.mediaDurationUs}µs): ${media}\nAPI submission does not prove host receipt.`,
+        frame, { severity: keyboardSuccess && mediaSuccess ? 'info' : 'warn' });
     }
 
     handleSnapshotBegin(frame) {
@@ -752,6 +857,10 @@ pre {
         const validKeyboard = frame.reportLength === 9 && frame.report[0] === 1;
         const validMedia = frame.reportLength === 2 && frame.report[0] === 3;
         if (!validKeyboard && !validMedia) return `Invalid HID report ID/length: id ${frame.report[0] ?? 'none'}, length ${frame.reportLength}.`;
+      }
+      if (frame.type === 12) {
+        if (![0, 1].includes(frame.keyboardSuccessRaw) || ![0, 1].includes(frame.mediaSuccessRaw)) return 'Invalid HID_OUTPUT success value.';
+        if (frame.keyboardReport[0] !== 1 || frame.mediaReport[0] !== 3) return 'Invalid HID_OUTPUT report IDs.';
       }
       if ((frame.type === 6 || frame.type === 8) && frame.count > MAX_QUEUE_ENTRIES) return `${frame.typeName} count ${frame.count} exceeds ${MAX_QUEUE_ENTRIES}.`;
       return null;
@@ -926,7 +1035,7 @@ pre {
       return {
         id: safeOptionalPositiveInt(e.id, `events[${index}].id`) || index + 1,
         kind: KIND_SET.has(e.kind) ? e.kind : fail(`events[${index}].kind is invalid.`),
-        title: safeString(e.title, `events[${index}].title`, 160),
+        title: safeString(e.title, `events[${index}].title`, 512),
         detail: safeString(e.detail, `events[${index}].detail`, 2000),
         sequence: safeOptionalUint32(e.sequence, `events[${index}].sequence`),
         typeName: safeString(e.typeName || 'LOCAL', `events[${index}].typeName`, 40),
@@ -1082,7 +1191,10 @@ pre {
     frames.push(makeFrame(2, seq++, 1004000, p => { p.setUint32(0, 100, true); p.setUint32(4, 1003900, true); p.setUint8(8, 1); p.setUint8(9, 2); p.setUint8(10, 1); p.setUint8(11, 0); }));
     frames.push(makeFrame(4, seq++, 1009000, p => { p.setUint32(0, 100, true); p.setUint32(4, 0, true); p.setUint8(8, 1); p.setUint8(9, 0); p.setUint8(10, 0); }));
     frames.push(makeFrame(4, seq++, 1043000, p => { p.setUint32(0, 100, true); p.setUint32(4, 0, true); p.setUint8(8, 8); p.setUint8(9, 1); p.setUint8(10, 0); }));
-    frames.push(makeFrame(5, seq++, 1043800, (p, b) => { p.setUint8(0, 9); p.setUint8(1, 1); p.setUint32(2, 420, true); b.set([1, 0, 0, 4, 0, 0, 0, 0, 0], 26); }));
+    frames.push(makeFrame(12, seq++, 1043800, (p, b) => {
+      p.setUint8(0, 1); p.setUint8(1, 1); p.setUint32(2, 420, true); p.setUint32(6, 80, true);
+      b.set([1, 4, 0, 4, 24, 0, 0, 0, 0, 3, 0], 30);
+    }));
     frames.push(makeFrame(3, seq++, 1044200, p => { p.setUint32(0, 100, true); p.setUint8(4, 1); p.setUint8(5, 0); }));
     frames.push(makeFrame(2, seq++, 1180000, p => { p.setUint32(0, 101, true); p.setUint32(4, 1180000, true); p.setUint8(8, 3); p.setUint8(9, 1); p.setUint8(10, 1); p.setUint8(11, 1); }));
     frames.push(makeFrame(11, seq++, 1180200, p => { p.setUint8(0, 2); p.setUint8(1, 1); }));
@@ -1366,7 +1478,8 @@ pre {
       const desiredGap = Math.round(deltaMs * this.zoom * 0.08);
       const gap = Math.max(6, Math.min(110, desiredGap));
       const row = document.createElement('button');
-      row.className = `event ${event.kind.toLowerCase()} ${event.severity} ${event.id === this.selectedEventId ? 'selected' : ''}`;
+      const compact = event.kind === 'INPUT' || event.kind === 'OUTPUT';
+      row.className = `event ${event.kind.toLowerCase()} ${compact ? 'compact' : ''} ${event.severity} ${event.id === this.selectedEventId ? 'selected' : ''}`;
       row.type = 'button';
       row.style.marginTop = `${gap}px`;
       row.addEventListener('click', () => {
@@ -1376,7 +1489,7 @@ pre {
         this.render();
       });
 
-      if (desiredGap > 110) {
+      if (desiredGap > 110 && !compact) {
         const compressed = document.createElement('div');
         compressed.className = 'compressedGap';
         compressed.textContent = `compressed visible gap: +${formatMicros(visibleDeltaUs)}`;
@@ -1390,6 +1503,15 @@ pre {
       main.className = 'eventMain';
       const title = document.createElement('strong');
       title.textContent = event.title;
+      if (compact) {
+        main.append(title);
+        const time = document.createElement('small');
+        time.className = 'eventTime';
+        time.textContent = formatMicros(event.timestampMicros);
+        row.title = `${event.title}\nseq ${event.sequence ?? '—'}, visible delta ${formatMicros(visibleDeltaUs)}${desiredGap > 110 ? ' (gap compressed)' : ''}\nClick for full details`;
+        row.append(lane, main, time);
+        return row;
+      }
       const meta = document.createElement('small');
       meta.textContent = `seq ${event.sequence ?? '—'} · t ${formatMicros(event.timestampMicros)} · visible Δ ${formatMicros(visibleDeltaUs)} · stored Δ ${formatMicros(event.deltaUs)}`;
       const detail = document.createElement('span');
@@ -1407,7 +1529,7 @@ pre {
         return;
       }
       const queue = selected.queueKnown
-        ? (selected.queueAfter.length ? selected.queueAfter.map(q => `slot ${q.slot}: #${q.id} r${q.row}c${q.col} ${q.pressed ? 'down' : 'up'}`).join('\n') : '(empty)')
+        ? (selected.queueAfter.length ? selected.queueAfter.map(q => `slot ${q.slot}: #${q.id} row ${q.row + 1} column ${q.col + 1} ${q.pressed ? 'down' : 'up'}`).join('\n') : '(empty)')
         : 'Unknown until a complete SNAPSHOT_BEGIN/ENTRY*/SNAPSHOT_END checkpoint.';
       panel.textContent = `${selected.kind} · ${selected.title}
 ${selected.detail}

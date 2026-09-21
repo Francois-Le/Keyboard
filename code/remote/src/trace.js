@@ -19,7 +19,8 @@
     8: 'SNAPSHOT_END',
     9: 'LOSS',
     10: 'I2C_RESET',
-    11: 'QUEUE_OVERFLOW'
+    11: 'QUEUE_OVERFLOW',
+    12: 'HID_OUTPUT'
   };
   const INPUT = 'INPUT';
   const INTERNAL = 'INTERNAL';
@@ -44,8 +45,44 @@
   const MAX_QUEUE_ENTRIES = 255;
   const MAX_ISSUES = 200;
   const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
-  const KEYBOARD_MODIFIERS = ['LCTRL', 'LSHIFT', 'LALT', 'LGUI', 'RCTRL', 'RSHIFT', 'RALT', 'RGUI'];
-  const MEDIA_BITS = ['PLAY_PAUSE', 'SCAN_NEXT', 'SCAN_PREV', 'STOP', 'MUTE', 'VOLUME_UP', 'VOLUME_DOWN', 'EJECT'];
+  const KEYBOARD_MODIFIERS = ['Ctrl', 'Shift', 'Alt', 'Win', 'Right Ctrl', 'Right Shift', 'Right Alt', 'Right Win'];
+  const MEDIA_BITS = ['Next track', 'Previous track', 'Stop', 'Play/Pause', 'Mute', 'Volume up', 'Volume down', 'Unknown media bit 7'];
+  const KEY_NAMES = {
+    1: 'Rollover error', 2: 'POST error', 3: 'Undefined error',
+    40: 'Enter', 41: 'Escape', 42: 'Backspace', 43: 'Tab', 44: 'Space',
+    45: '-', 46: '=', 47: '[', 48: ']', 49: '\\', 50: '#', 51: ';',
+    52: "'", 53: '`', 54: ',', 55: '.', 56: '/', 57: 'Caps Lock',
+    70: 'Print Screen', 71: 'Scroll Lock', 72: 'Pause', 73: 'Insert',
+    74: 'Home', 75: 'Page Up', 76: 'Delete', 77: 'End', 78: 'Page Down',
+    79: 'Right', 80: 'Left', 81: 'Down', 82: 'Up', 83: 'Num Lock',
+    84: 'Keypad /', 85: 'Keypad *', 86: 'Keypad -', 87: 'Keypad +',
+    88: 'Keypad Enter', 98: 'Keypad 0', 99: 'Keypad .', 100: 'Non-US \\',
+    101: 'Menu', 102: 'Power', 103: 'Keypad ='
+  };
+
+  function keyName(code) {
+    if (code >= 4 && code <= 29) return String.fromCharCode(65 + code - 4);
+    if (code >= 30 && code <= 39) return String((code - 29) % 10);
+    if (code >= 58 && code <= 69) return `F${code - 57}`;
+    if (code >= 104 && code <= 115) return `F${code - 91}`;
+    if (code >= 89 && code <= 97) return `Keypad ${code - 88}`;
+    if (code >= 224 && code <= 231) return KEYBOARD_MODIFIERS[code - 224];
+    return KEY_NAMES[code] || `HID 0x${code.toString(16).padStart(2, '0')}`;
+  }
+
+  function reportKeys(report) {
+    if (report[0] === 3) return MEDIA_BITS.filter((_, bit) => (report[1] & (1 << bit)) !== 0);
+    return [
+      ...KEYBOARD_MODIFIERS.filter((_, bit) => (report[1] & (1 << bit)) !== 0),
+      ...new Set(report.slice(3, 9).filter(Boolean).map(keyName))
+    ];
+  }
+
+  function outputTitle(reports, success) {
+    const keys = reports.flatMap(reportKeys);
+    const state = keys.length ? `keys pressed: ${keys.join(', ')}` : 'all keys released';
+    return success ? state : `output failed: ${state} (requested)`;
+  }
 
   function crc16CcittFalse(bytes, start = 0, end = bytes.length) {
     let crc = 0xffff;
@@ -246,6 +283,14 @@
         frame.head = payload.getUint8(0);
         frame.tail = payload.getUint8(1);
         break;
+      case 12:
+        frame.keyboardSuccessRaw = payload.getUint8(0);
+        frame.mediaSuccessRaw = payload.getUint8(1);
+        frame.keyboardDurationUs = readU32(payload, 2);
+        frame.mediaDurationUs = readU32(payload, 6);
+        frame.keyboardReport = Array.from(bytes.slice(30, 39));
+        frame.mediaReport = Array.from(bytes.slice(39, 41));
+        break;
     }
     return frame;
   }
@@ -350,6 +395,9 @@
         case 5:
           generated.push(this.handleHid(frame));
           break;
+        case 12:
+          generated.push(this.handleOutput(frame));
+          break;
         case 6:
           generated.push(this.handleSnapshotBegin(frame));
           break;
@@ -420,7 +468,7 @@
         }
         this.queue.push(item);
       }
-      return this.addEvent(INPUT, frame.pressed ? 'Key press enqueued' : 'Key release enqueued', `id ${frame.id}, row ${frame.row}, col ${frame.col}, slot ${frame.slot}, sampled ${frame.sampleMicros32}µs.`, frame);
+      return this.addEvent(INPUT, `${frame.pressed ? 'press' : 'release'} row ${frame.row + 1} column ${frame.col + 1}`, `id ${frame.id}, raw row ${frame.row}, col ${frame.col} (zero-based), slot ${frame.slot}, sampled ${frame.sampleMicros32}µs.`, frame);
     }
 
     handleRemove(frame) {
@@ -449,7 +497,17 @@
       const validLength = (frame.reportLength === 9 && frame.report[0] === 1) || (frame.reportLength === 2 && frame.report[0] === 3);
       const bytes = frame.report.map(b => b.toString(16).padStart(2, '0')).join(' ');
       const interpreted = validLength ? this.describeHid(frame) : 'Invalid report ID/length (keyboard requires ID 1 length 9; media requires ID 3 length 2).';
-      return this.addEvent(OUTPUT, frame.success ? 'HID send submitted' : 'HID send failed', `${interpreted} length ${frame.reportLength}, duration ${frame.sendDurationUs}µs, bytes [${bytes}]. API submission does not prove host receipt.`, frame, { severity: frame.success && validLength ? 'info' : 'warn' });
+      return this.addEvent(OUTPUT, outputTitle([frame.report], frame.success), `${interpreted} length ${frame.reportLength}, duration ${frame.sendDurationUs}µs, bytes [${bytes}]. API submission does not prove host receipt.`, frame, { severity: frame.success && validLength ? 'info' : 'warn' });
+    }
+
+    handleOutput(frame) {
+      const keyboardSuccess = frame.keyboardSuccessRaw === 1;
+      const mediaSuccess = frame.mediaSuccessRaw === 1;
+      const keyboard = this.describeHid({ report: frame.keyboardReport, success: keyboardSuccess });
+      const media = this.describeHid({ report: frame.mediaReport, success: mediaSuccess });
+      return this.addEvent(OUTPUT, outputTitle([frame.keyboardReport, frame.mediaReport], keyboardSuccess && mediaSuccess),
+        `Keyboard ${keyboardSuccess ? 'submitted' : 'FAILED'} (${frame.keyboardDurationUs}µs): ${keyboard}\nMedia ${mediaSuccess ? 'submitted' : 'FAILED'} (${frame.mediaDurationUs}µs): ${media}\nAPI submission does not prove host receipt.`,
+        frame, { severity: keyboardSuccess && mediaSuccess ? 'info' : 'warn' });
     }
 
     handleSnapshotBegin(frame) {
@@ -539,6 +597,10 @@
         const validKeyboard = frame.reportLength === 9 && frame.report[0] === 1;
         const validMedia = frame.reportLength === 2 && frame.report[0] === 3;
         if (!validKeyboard && !validMedia) return `Invalid HID report ID/length: id ${frame.report[0] ?? 'none'}, length ${frame.reportLength}.`;
+      }
+      if (frame.type === 12) {
+        if (![0, 1].includes(frame.keyboardSuccessRaw) || ![0, 1].includes(frame.mediaSuccessRaw)) return 'Invalid HID_OUTPUT success value.';
+        if (frame.keyboardReport[0] !== 1 || frame.mediaReport[0] !== 3) return 'Invalid HID_OUTPUT report IDs.';
       }
       if ((frame.type === 6 || frame.type === 8) && frame.count > MAX_QUEUE_ENTRIES) return `${frame.typeName} count ${frame.count} exceeds ${MAX_QUEUE_ENTRIES}.`;
       return null;
@@ -713,7 +775,7 @@
       return {
         id: safeOptionalPositiveInt(e.id, `events[${index}].id`) || index + 1,
         kind: KIND_SET.has(e.kind) ? e.kind : fail(`events[${index}].kind is invalid.`),
-        title: safeString(e.title, `events[${index}].title`, 160),
+        title: safeString(e.title, `events[${index}].title`, 512),
         detail: safeString(e.detail, `events[${index}].detail`, 2000),
         sequence: safeOptionalUint32(e.sequence, `events[${index}].sequence`),
         typeName: safeString(e.typeName || 'LOCAL', `events[${index}].typeName`, 40),

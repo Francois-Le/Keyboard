@@ -16,6 +16,7 @@ void input(const Event& event, uint8_t slot);
 void removed(const Event& event, uint8_t slot, Removal reason);
 void decision(const Event& event, Action action, uint32_t related = 0, uint8_t layer = 0, uint8_t count = 0);
 void hid(const uint8_t* report, uint8_t length, bool success, uint32_t duration);
+void output(const uint8_t* keys, uint8_t modifiers, uint8_t media, bool keyboardSuccess, bool mediaSuccess, uint32_t keyboardDuration, uint32_t mediaDuration);
 void i2cReset(uint8_t chip);
 void queueOverflow(uint8_t head, uint8_t tail);
 #else
@@ -25,6 +26,7 @@ inline void input(const Event&, uint8_t) {}
 inline void removed(const Event&, uint8_t, Removal) {}
 inline void decision(const Event&, Action, uint32_t = 0, uint8_t = 0, uint8_t = 0) {}
 inline void hid(const uint8_t*, uint8_t, bool, uint32_t) {}
+inline void output(const uint8_t*, uint8_t, uint8_t, bool, bool, uint32_t, uint32_t) {}
 inline void i2cReset(uint8_t) {}
 inline void queueOverflow(uint8_t, uint8_t) {}
 #endif

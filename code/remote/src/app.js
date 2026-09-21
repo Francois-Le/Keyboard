@@ -58,7 +58,10 @@
     frames.push(makeFrame(2, seq++, 1004000, p => { p.setUint32(0, 100, true); p.setUint32(4, 1003900, true); p.setUint8(8, 1); p.setUint8(9, 2); p.setUint8(10, 1); p.setUint8(11, 0); }));
     frames.push(makeFrame(4, seq++, 1009000, p => { p.setUint32(0, 100, true); p.setUint32(4, 0, true); p.setUint8(8, 1); p.setUint8(9, 0); p.setUint8(10, 0); }));
     frames.push(makeFrame(4, seq++, 1043000, p => { p.setUint32(0, 100, true); p.setUint32(4, 0, true); p.setUint8(8, 8); p.setUint8(9, 1); p.setUint8(10, 0); }));
-    frames.push(makeFrame(5, seq++, 1043800, (p, b) => { p.setUint8(0, 9); p.setUint8(1, 1); p.setUint32(2, 420, true); b.set([1, 0, 0, 4, 0, 0, 0, 0, 0], 26); }));
+    frames.push(makeFrame(12, seq++, 1043800, (p, b) => {
+      p.setUint8(0, 1); p.setUint8(1, 1); p.setUint32(2, 420, true); p.setUint32(6, 80, true);
+      b.set([1, 4, 0, 4, 24, 0, 0, 0, 0, 3, 0], 30);
+    }));
     frames.push(makeFrame(3, seq++, 1044200, p => { p.setUint32(0, 100, true); p.setUint8(4, 1); p.setUint8(5, 0); }));
     frames.push(makeFrame(2, seq++, 1180000, p => { p.setUint32(0, 101, true); p.setUint32(4, 1180000, true); p.setUint8(8, 3); p.setUint8(9, 1); p.setUint8(10, 1); p.setUint8(11, 1); }));
     frames.push(makeFrame(11, seq++, 1180200, p => { p.setUint8(0, 2); p.setUint8(1, 1); }));
@@ -342,7 +345,8 @@
       const desiredGap = Math.round(deltaMs * this.zoom * 0.08);
       const gap = Math.max(6, Math.min(110, desiredGap));
       const row = document.createElement('button');
-      row.className = `event ${event.kind.toLowerCase()} ${event.severity} ${event.id === this.selectedEventId ? 'selected' : ''}`;
+      const compact = event.kind === 'INPUT' || event.kind === 'OUTPUT';
+      row.className = `event ${event.kind.toLowerCase()} ${compact ? 'compact' : ''} ${event.severity} ${event.id === this.selectedEventId ? 'selected' : ''}`;
       row.type = 'button';
       row.style.marginTop = `${gap}px`;
       row.addEventListener('click', () => {
@@ -352,7 +356,7 @@
         this.render();
       });
 
-      if (desiredGap > 110) {
+      if (desiredGap > 110 && !compact) {
         const compressed = document.createElement('div');
         compressed.className = 'compressedGap';
         compressed.textContent = `compressed visible gap: +${formatMicros(visibleDeltaUs)}`;
@@ -366,6 +370,15 @@
       main.className = 'eventMain';
       const title = document.createElement('strong');
       title.textContent = event.title;
+      if (compact) {
+        main.append(title);
+        const time = document.createElement('small');
+        time.className = 'eventTime';
+        time.textContent = formatMicros(event.timestampMicros);
+        row.title = `${event.title}\nseq ${event.sequence ?? '—'}, visible delta ${formatMicros(visibleDeltaUs)}${desiredGap > 110 ? ' (gap compressed)' : ''}\nClick for full details`;
+        row.append(lane, main, time);
+        return row;
+      }
       const meta = document.createElement('small');
       meta.textContent = `seq ${event.sequence ?? '—'} · t ${formatMicros(event.timestampMicros)} · visible Δ ${formatMicros(visibleDeltaUs)} · stored Δ ${formatMicros(event.deltaUs)}`;
       const detail = document.createElement('span');
@@ -383,7 +396,7 @@
         return;
       }
       const queue = selected.queueKnown
-        ? (selected.queueAfter.length ? selected.queueAfter.map(q => `slot ${q.slot}: #${q.id} r${q.row}c${q.col} ${q.pressed ? 'down' : 'up'}`).join('\n') : '(empty)')
+        ? (selected.queueAfter.length ? selected.queueAfter.map(q => `slot ${q.slot}: #${q.id} row ${q.row + 1} column ${q.col + 1} ${q.pressed ? 'down' : 'up'}`).join('\n') : '(empty)')
         : 'Unknown until a complete SNAPSHOT_BEGIN/ENTRY*/SNAPSHOT_END checkpoint.';
       panel.textContent = `${selected.kind} · ${selected.title}
 ${selected.detail}

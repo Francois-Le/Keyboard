@@ -63,15 +63,16 @@ void KeyboardHID::press(uint8_t *keys, uint8_t modifiers, uint8_t mediaKey) {
   report.data[8] = keys[5];
   report.length = 9;
   uint32_t start = micros();
-  bool sent = send(&report);
-  Trace::hid(report.data, report.length, sent, uint32_t(micros() - start));
+  const bool keyboardSent = send(&report);
+  const uint32_t keyboardDuration = uint32_t(micros() - start);
 
   report.data[0] = REPORT_ID_VOLUME;
   report.data[1] = mediaKey;
   report.length = 2;
   start = micros();
-  sent = send(&report);
-  Trace::hid(report.data, report.length, sent, uint32_t(micros() - start));
+  const bool mediaSent = send(&report);
+  const uint32_t mediaDuration = uint32_t(micros() - start);
+  Trace::output(keys, modifiers, mediaKey, keyboardSent, mediaSent, keyboardDuration, mediaDuration);
 }
 
 void KeyboardHID::releaseAll() {
