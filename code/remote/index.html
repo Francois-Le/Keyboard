@@ -1,0 +1,1805 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keyboard Trace Timeline</title>
+  <style>
+:root {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --panel: #161b22;
+  --panel2: #1f2937;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --border: #30363d;
+  --input: #2f81f7;
+  --internal: #a371f7;
+  --output: #3fb950;
+  --warn: #d29922;
+  --error: #f85149;
+}
+
+* { box-sizing: border-box; }
+html { height: 100%; overflow: hidden; }
+body {
+  margin: 0;
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  overflow: hidden;
+  background: radial-gradient(circle at 20% 0%, #1b2a4a 0, transparent 35%), var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+header {
+  padding: 22px 28px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(13, 17, 23, 0.9);
+}
+
+h1 { margin: 0 0 6px; font-size: 24px; }
+.subtitle { margin: 0; color: var(--muted); max-width: 1100px; }
+
+.toolbar, .filters, .stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.toolbar { padding: 14px 28px; background: rgba(22, 27, 34, 0.8); border-bottom: 1px solid var(--border); }
+.filters { padding: 0 28px 14px; background: rgba(22, 27, 34, 0.8); border-bottom: 1px solid var(--border); }
+.stats { padding: 10px 28px; color: var(--muted); border-bottom: 1px solid var(--border); gap: 22px; }
+
+button, .fileButton, select {
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+button:hover, .fileButton:hover, select:hover { border-color: #58a6ff; }
+select { max-width: 100%; font: inherit; padding: 4px 6px; }
+#layoutNotice { color: var(--warn); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.fileButton.disabled { opacity: 0.5; pointer-events: none; }
+input[type="file"] { display: none; }
+label { color: var(--muted); }
+
+.status {
+  flex: 1 1 360px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+.status.ok { border-color: var(--output); }
+.status.busy { border-color: var(--input); }
+.status.error { border-color: var(--error); color: #ffd7d5; }
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+  gap: 18px;
+  padding: 18px 28px 28px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.timeline {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 18px 18px 70px 38px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(13, 17, 23, 0.72);
+  position: relative;
+}
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 24px;
+  top: 20px;
+  bottom: 20px;
+  width: 2px;
+  background: linear-gradient(var(--border), #58a6ff44, var(--border));
+}
+
+.event {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  width: 100%;
+  text-align: left;
+  position: relative;
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.event::before {
+  content: "";
+  position: absolute;
+  left: -21px;
+  top: 20px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 4px var(--bg);
+}
+.event.input { color: var(--input); }
+.event.internal { color: var(--internal); }
+.event.details { color: var(--muted); }
+.event.output { color: var(--output); }
+.event.checkpoint { color: var(--muted); }
+.event.checkpoint .lane { font-size: 10px; letter-spacing: 0.03em; }
+.event.warn { border-color: var(--warn); }
+.event.error { border-color: var(--error); }
+.event.selected { outline: 2px solid #58a6ff; }
+
+.lane {
+  align-self: start;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.eventMain { display: grid; gap: 3px; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.event.compact {
+  grid-template-columns: 80px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.event.compact::before { top: calc(50% - 6px); }
+.compact .lane { align-self: center; }
+.compact .eventMain {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.compact strong { display: inline; }
+.keyCombination { color: var(--muted); font-weight: normal; }
+.eventTime { color: var(--muted); white-space: nowrap; }
+
+.sidePanel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sidePanel h2 { margin: 0; }
+pre {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+}
+.empty { color: var(--muted); padding: 28px; text-align: center; }
+.sensitivity { color: #ffd8a8; }
+
+@media (max-width: 900px) {
+  main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; padding: 10px; }
+}
+
+@media (max-width: 600px), (max-height: 650px) {
+  header { padding: 8px 12px; }
+  h1 { font-size: 19px; }
+  .subtitle { display: none; }
+  .toolbar, .filters, .stats { padding: 6px 12px; gap: 6px; }
+  button, .fileButton { padding: 6px 8px; }
+  .sensitivity { font-size: 11px; }
+  .status { flex-basis: 100%; padding: 4px 8px; }
+  .timeline { padding: 10px 8px 20px 30px; }
+  .timeline::before { left: 18px; }
+  .event::before { left: -18px; }
+  .event.compact { grid-template-columns: 72px minmax(0, 1fr) auto; gap: 4px; }
+  .lane { font-size: 10px; }
+}
+
+@media (min-width: 600px) and (max-height: 500px) {
+  main {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .sidePanel h2 { font-size: 16px; }
+}
+
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Keyboard Trace Timeline</h1>
+    <p class="subtitle">Local-only Web Serial viewer for KBT1 custom keyboard traces. Time flows downward; INPUT, INTERNAL decisions, and OUTPUT HID submissions are separated by labels and color.</p>
+  </header>
+  <section class="toolbar">
+    <button id="connectBtn" type="button">Connect keyboard</button>
+    <button id="disconnectBtn" type="button" disabled>Disconnect</button>
+    <button id="demoBtn" type="button">Demo trace</button>
+    <button id="clearBtn" type="button">Clear view</button>
+    <button id="exportBtn" type="button">Export trace</button>
+    <label class="fileButton">Import trace <input id="importInput" type="file" accept="application/json,.json"></label>
+    <div id="status" class="status">Starting…</div>
+  </section>
+  <section class="filters">
+    <label><input id="filterINPUT" type="checkbox" checked> INPUT</label>
+    <label><input id="filterINTERNAL" type="checkbox" checked> INTERNAL</label>
+    <label><input id="filterOUTPUT" type="checkbox" checked> OUTPUT</label>
+    <label><input id="filterDETAILS" type="checkbox"> DETAILS</label>
+    <label><input id="filterCHECKPOINT" type="checkbox"> CHECKPOINT</label>
+    <label><input id="followToggle" type="checkbox" checked> Follow while reading</label>
+    <label>Zoom <input id="zoom" type="range" min="0.4" max="4" step="0.1" value="1"></label>
+    <label>Layout <select id="keyboardLayout">
+      <option value="en-US">English (US QWERTY)</option>
+      <option value="fr-FR">French (France AZERTY)</option>
+    </select></label>
+    <small id="layoutNotice" role="status"></small>
+    <strong class="sensitivity">Capture is local; typed key data can be sensitive.</strong>
+  </section>
+  <section class="stats">
+    <span id="eventCount">0 retained / 0 shown</span>
+    <span id="queueState">queue unknown</span>
+    <span id="streamInfo">no HELLO yet</span>
+  </section>
+  <main>
+    <section id="timeline" class="timeline" aria-label="Vertical chronological trace timeline"></section>
+    <aside class="sidePanel">
+      <h2>Event details</h2>
+      <pre id="details">Click an event to inspect queue after it.</pre>
+    </aside>
+  </main>
+  <script>
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  root.KBTTrace = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const FRAME_SIZE = 48;
+  const PAYLOAD_SIZE = 26;
+  const MAGIC = [0x4b, 0x42, 0x54, 0x31]; // KBT1
+  const TYPES = {
+    1: 'HELLO',
+    2: 'INPUT',
+    3: 'REMOVE',
+    4: 'DECISION',
+    5: 'HID',
+    6: 'SNAPSHOT_BEGIN',
+    7: 'SNAPSHOT_ENTRY',
+    8: 'SNAPSHOT_END',
+    9: 'LOSS',
+    10: 'I2C_RESET',
+    11: 'QUEUE_OVERFLOW',
+    12: 'HID_OUTPUT',
+    13: 'LAYER_NAME'
+  };
+  const INPUT = 'INPUT';
+  const INTERNAL = 'INTERNAL';
+  const OUTPUT = 'OUTPUT';
+  const CHECKPOINT = 'CHECKPOINT';
+  const DETAILS = 'DETAILS';
+  const REMOVE_REASONS = {
+    1: 'processed',
+    2: 'debounce',
+    3: 'tap',
+    4: 'overlap'
+  };
+  const ACTIONS = {
+    1: 'debounce wait',
+    2: 'debounce cancel',
+    3: 'overlap wait',
+    4: 'overlap tap',
+    5: 'tap wait',
+    6: 'tap',
+    7: 'hold (no tap)',
+    8: 'process',
+    9: 'layer'
+  };
+  const INTERNAL_ACTIONS = {
+    2: 'Debounced key pair',
+    4: 'Overlap removed',
+    9: 'Layer changed'
+  };
+
+  function decisionKind(action) {
+    return Object.hasOwn(INTERNAL_ACTIONS, action) ? INTERNAL : DETAILS;
+  }
+  const MAX_QUEUE_ENTRIES = 255;
+  const MAX_ISSUES = 200;
+  const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+  const KEYBOARD_MODIFIERS = ['Ctrl', 'Shift', 'Alt', 'Win', 'Right Ctrl', 'Right Shift', 'Right Alt', 'Right Win'];
+  const KEYBOARD_LAYOUTS = {
+    'en-US': 'English (US QWERTY)',
+    'fr-FR': 'French (France AZERTY)'
+  };
+  const FRENCH_KEYS = {
+    4: 'Q', 16: ',', 20: 'A', 26: 'Z', 29: 'W',
+    30: '&', 31: 'é', 32: '"', 33: "'", 34: '(', 35: '-',
+    36: 'è', 37: '_', 38: 'ç', 39: 'à',
+    45: ')', 46: '=', 47: '^', 48: '$', 49: '*', 50: '*',
+    51: 'M', 52: 'ù', 53: '²', 54: ';', 55: ':', 56: '!', 100: '<'
+  };
+  const SHIFTED_KEYS = {
+    'en-US': {
+      30: '!', 31: '@', 32: '#', 33: '$', 34: '%', 35: '^',
+      36: '&', 37: '*', 38: '(', 39: ')',
+      45: '_', 46: '+', 47: '{', 48: '}', 49: '|', 50: '~',
+      51: ':', 52: '"', 53: '~', 54: '<', 55: '>', 56: '?', 100: '|'
+    },
+    'fr-FR': {
+      16: '?', 30: '1', 31: '2', 32: '3', 33: '4', 34: '5',
+      35: '6', 36: '7', 37: '8', 38: '9', 39: '0',
+      45: '°', 46: '+', 47: 'Dead ¨', 48: '£', 49: 'µ', 50: 'µ',
+      52: '%', 53: 'Unmapped', 54: '.', 55: '/', 56: '§', 100: '>'
+    }
+  };
+  // Traditional Windows French AZERTY: Ctrl+Alt selects the AltGr level.
+  const FRENCH_ALTGR = {
+    8: '€', 31: 'Dead ~', 32: '#', 33: '{', 34: '[', 35: '|',
+    36: 'Dead `', 37: '\\', 38: '^', 39: '@', 45: ']', 46: '}', 48: '¤'
+  };
+  const MEDIA_BITS = ['Next track', 'Previous track', 'Stop', 'Play/Pause', 'Mute', 'Volume up', 'Volume down', 'Unknown media bit 7'];
+  const KEY_NAMES = {
+    1: 'Rollover error', 2: 'POST error', 3: 'Undefined error',
+    40: 'Enter', 41: 'Escape', 42: 'Backspace', 43: 'Tab', 44: 'Space',
+    45: '-', 46: '=', 47: '[', 48: ']', 49: '\\', 50: '#', 51: ';',
+    52: "'", 53: '`', 54: ',', 55: '.', 56: '/', 57: 'Caps Lock',
+    70: 'Print Screen', 71: 'Scroll Lock', 72: 'Pause', 73: 'Insert',
+    74: 'Home', 75: 'Page Up', 76: 'Delete', 77: 'End', 78: 'Page Down',
+    79: 'Right', 80: 'Left', 81: 'Down', 82: 'Up', 83: 'Num Lock',
+    84: 'Keypad /', 85: 'Keypad *', 86: 'Keypad -', 87: 'Keypad +',
+    88: 'Keypad Enter', 98: 'Keypad 0', 99: 'Keypad .', 100: 'Non-US \\',
+    101: 'Menu', 102: 'Power', 103: 'Keypad ='
+  };
+
+  function keyName(code, layout = 'en-US') {
+    if (layout === 'fr-FR' && Object.hasOwn(FRENCH_KEYS, code)) return FRENCH_KEYS[code];
+    if (layout === 'fr-FR' && code === 230) return 'AltGr';
+    if (code >= 4 && code <= 29) return String.fromCharCode(65 + code - 4);
+    if (code >= 30 && code <= 39) return String((code - 29) % 10);
+    if (code >= 58 && code <= 69) return `F${code - 57}`;
+    if (code >= 104 && code <= 115) return `F${code - 91}`;
+    if (code >= 89 && code <= 97) return `Keypad ${code - 88}`;
+    if (code >= 224 && code <= 231) return KEYBOARD_MODIFIERS[code - 224];
+    return KEY_NAMES[code] || `HID 0x${code.toString(16).padStart(2, '0')}`;
+  }
+
+  function reportKeys(report, layout = 'en-US') {
+    if (report[0] === 3) return MEDIA_BITS.filter((_, bit) => (report[1] & (1 << bit)) !== 0);
+    return [
+      ...KEYBOARD_MODIFIERS.flatMap((name, bit) => (report[1] & (1 << bit)) ? [layout === 'fr-FR' && bit === 6 ? 'AltGr' : name] : []),
+      ...new Set(report.slice(3, 9).filter(Boolean).map(code => keyName(code, layout)))
+    ];
+  }
+
+  function translatedKeys(report, layout) {
+    if (report[0] === 3) return reportKeys(report, layout);
+    const modifiers = report[1];
+    const codes = [...new Set(report.slice(3, 9).filter(Boolean))];
+    if (!codes.length) return modifiers ? ['Modifier'] : [];
+    const shift = (modifiers & 0x22) !== 0;
+    const control = (modifiers & 0x11) !== 0;
+    const alt = (modifiers & 0x44) !== 0;
+    const altGr = layout === 'fr-FR' && ((modifiers & 0x40) !== 0 || (control && alt));
+    if ((modifiers & 0x88) || ((control || alt) && !altGr)) return ['Shortcut'];
+    return codes.map(code => {
+      const label = keyName(code, layout);
+      // Named keys are actions, not character predictions (including keypad locks).
+      const printable = /^[A-Z]$/.test(label) || label.length === 1;
+      if (!printable) return label;
+      if (altGr) return shift ? 'Unmapped' : (FRENCH_ALTGR[code] || 'Unmapped');
+      if (/^[A-Z]$/.test(label)) return shift ? label : label.toLowerCase();
+      if (shift && Object.hasOwn(SHIFTED_KEYS[layout], code)) return SHIFTED_KEYS[layout][code];
+      if (layout === 'fr-FR' && code === 47) return 'Dead ^';
+      return label;
+    });
+  }
+
+  function outputPresentation(reports, success, layout = 'en-US') {
+    const result = reports.flatMap(report => translatedKeys(report, layout)).join(', ') || 'Released';
+    const keys = reports.flatMap(report => reportKeys(report, layout)).join(', ');
+    return {
+      primary: success ? result : `Failed: ${result}`,
+      combination: keys ? `(${keys})` : ''
+    };
+  }
+
+  function presentationTitle(presentation) {
+    return presentation.primary + (presentation.combination ? ` ${presentation.combination}` : '');
+  }
+
+  function outputTitle(reports, success, layout = 'en-US') {
+    return presentationTitle(outputPresentation(reports, success, layout));
+  }
+
+  function eventPresentation(event, layout = 'en-US') {
+    if (!Object.hasOwn(KEYBOARD_LAYOUTS, layout)) throw new Error(`Unsupported keyboard layout: ${layout}`);
+    const raw = event.raw;
+    const fallback = { primary: event.title, combination: '' };
+    if (!raw) return fallback;
+    if (event.kind !== OUTPUT) {
+      if (event.kind === CHECKPOINT) {
+        if (raw.type === 1 && Number.isInteger(raw.streamId)) fallback.primary = `Stream metadata: stream ${raw.streamId}`;
+        if (raw.type === 8 && Number.isInteger(raw.count)) fallback.primary = `Queue checkpoint: ${raw.count} pending`;
+      } else if (!['warn', 'error'].includes(event.severity)) {
+        if (raw.type === 3 && Number.isInteger(raw.id) && Object.hasOwn(REMOVE_REASONS, raw.reason)) {
+          fallback.primary = `Remove #${raw.id} (${REMOVE_REASONS[raw.reason]})`;
+        }
+        if (raw.type === 4 && Number.isInteger(raw.primaryID) && Object.hasOwn(ACTIONS, raw.action)) {
+          const action = INTERNAL_ACTIONS[raw.action] || ACTIONS[raw.action];
+          fallback.primary = `${action} #${raw.primaryID}`;
+          if ([2, 4].includes(raw.action) && raw.relatedID) fallback.primary += ` / #${raw.relatedID}`;
+          if (raw.action === 9 && Number.isInteger(raw.layerMask)) fallback.primary = `Layer changed: ${event.layerName || `0x${raw.layerMask.toString(16).padStart(2, '0')}`}`;
+        }
+        if (raw.type === 10 && Number.isInteger(raw.chipIndex)) fallback.primary = `I2C reset: chip ${raw.chipIndex}`;
+      }
+      return fallback;
+    }
+    // Imported captures may not contain valid raw reports; retain their saved title.
+    const validReport = (report, id, length) => Array.isArray(report) && report.length === length &&
+      report[0] === id && report.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255);
+    if (raw.type === 12 && validReport(raw.keyboardReport, 1, 9) && validReport(raw.mediaReport, 3, 2)) {
+      return outputPresentation([raw.keyboardReport, raw.mediaReport], raw.keyboardSuccessRaw === 1 && raw.mediaSuccessRaw === 1, layout);
+    }
+    if (raw.type === 5 && (validReport(raw.report, 1, 9) || validReport(raw.report, 3, 2))) {
+      return outputPresentation([raw.report], raw.success === true, layout);
+    }
+    return fallback;
+  }
+
+  function eventTitle(event, layout = 'en-US') {
+    return presentationTitle(eventPresentation(event, layout));
+  }
+
+  function crc16CcittFalse(bytes, start = 0, end = bytes.length) {
+    let crc = 0xffff;
+    for (let i = start; i < end; i++) {
+      crc ^= bytes[i] << 8;
+      for (let bit = 0; bit < 8; bit++) {
+        crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+        crc &= 0xffff;
+      }
+    }
+    return crc;
+  }
+
+  function concatBytes(a, b) {
+    if (!a || a.length === 0) return new Uint8Array(b);
+    const out = new Uint8Array(a.length + b.length);
+    out.set(a, 0);
+    out.set(b, a.length);
+    return out;
+  }
+
+  function bytesEqualMagic(bytes, offset) {
+    return bytes[offset] === MAGIC[0] &&
+      bytes[offset + 1] === MAGIC[1] &&
+      bytes[offset + 2] === MAGIC[2] &&
+      bytes[offset + 3] === MAGIC[3];
+  }
+
+  function findMagic(bytes, start) {
+    for (let i = start; i <= bytes.length - 4; i++) {
+      if (bytesEqualMagic(bytes, i)) return i;
+    }
+    return -1;
+  }
+
+  function findProtocolPrefix(bytes, start) {
+    for (let i = start; i <= bytes.length - 3; i++) {
+      if (bytes[i] === MAGIC[0] && bytes[i + 1] === MAGIC[1] && bytes[i + 2] === MAGIC[2]) return i;
+    }
+    return -1;
+  }
+
+  function readU32(view, offset) {
+    return view.getUint32(offset, true);
+  }
+
+  function readU64(view, offset) {
+    if (typeof view.getBigUint64 === 'function') return view.getBigUint64(offset, true);
+    const lo = BigInt(view.getUint32(offset, true));
+    const hi = BigInt(view.getUint32(offset + 4, true));
+    return (hi << 32n) | lo;
+  }
+
+  function clonePayload(bytes) {
+    return Array.from(bytes.slice(20, 46));
+  }
+
+  class TraceParser {
+    constructor(options = {}) {
+      this.buffer = new Uint8Array(0);
+      this.maxBufferedGarbage = options.maxBufferedGarbage || 192;
+    }
+
+    reset() {
+      this.buffer = new Uint8Array(0);
+    }
+
+    push(chunk) {
+      const input = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+      this.buffer = concatBytes(this.buffer, input);
+      const records = [];
+
+      while (this.buffer.length >= 4) {
+        const protocolAt = findProtocolPrefix(this.buffer, 0);
+        if (protocolAt >= 0 && this.buffer.length >= protocolAt + 4 && this.buffer[protocolAt + 3] !== MAGIC[3]) {
+          if (protocolAt > 0) records.push({ ok: false, error: `Discarded ${protocolAt} byte(s) before KBT protocol marker.` });
+          records.push({ ok: false, error: `Unsupported KBT protocol version byte 0x${this.buffer[protocolAt + 3].toString(16).padStart(2, '0')}; this app supports KBT1 only.` });
+          this.buffer = this.buffer.slice(protocolAt + 4);
+          continue;
+        }
+        const magicAt = findMagic(this.buffer, 0);
+        if (magicAt < 0) {
+          const keep = Math.min(3, this.buffer.length);
+          const dropped = this.buffer.length - keep;
+          if (dropped > 0) records.push({ ok: false, error: `Discarded ${dropped} byte(s) while searching for KBT1 frame magic.` });
+          this.buffer = this.buffer.slice(this.buffer.length - keep);
+          break;
+        }
+        if (magicAt > 0) {
+          records.push({ ok: false, error: `Discarded ${magicAt} byte(s) before KBT1 frame magic.` });
+          this.buffer = this.buffer.slice(magicAt);
+        }
+        if (this.buffer.length < FRAME_SIZE) break;
+
+        const frameBytes = this.buffer.slice(0, FRAME_SIZE);
+        const view = new DataView(frameBytes.buffer, frameBytes.byteOffset, frameBytes.byteLength);
+        const expectedCrc = view.getUint16(46, true);
+        const actualCrc = crc16CcittFalse(frameBytes, 0, 46);
+        if (expectedCrc !== actualCrc) {
+          records.push({ ok: false, error: `CRC mismatch at sequence candidate ${view.getUint32(8, true)} (expected 0x${expectedCrc.toString(16).padStart(4, '0')}, got 0x${actualCrc.toString(16).padStart(4, '0')}). Resynchronizing.` });
+          this.buffer = this.buffer.slice(1);
+          continue;
+        }
+
+        const type = frameBytes[4];
+        if (frameBytes[5] !== 0 || frameBytes[6] !== 0 || frameBytes[7] !== 0) {
+          records.push({ ok: false, error: `Reserved header bytes are non-zero for sequence ${view.getUint32(8, true)}. Frame ignored.` });
+          this.buffer = this.buffer.slice(FRAME_SIZE);
+          continue;
+        }
+        if (!TYPES[type]) {
+          records.push({ ok: false, error: `Unsupported KBT1 frame type ${type} at sequence ${view.getUint32(8, true)}. Firmware/app protocol versions may not match.` });
+          this.buffer = this.buffer.slice(FRAME_SIZE);
+          continue;
+        }
+
+        records.push({ ok: true, frame: parseFrame(frameBytes, view) });
+        this.buffer = this.buffer.slice(FRAME_SIZE);
+        if (this.buffer.length > this.maxBufferedGarbage && findMagic(this.buffer, 0) < 0) {
+          records.push({ ok: false, error: `Discarded ${this.buffer.length - 3} buffered garbage byte(s).` });
+          this.buffer = this.buffer.slice(-3);
+        }
+      }
+      return records;
+    }
+  }
+
+  function parseFrame(bytes, view) {
+    const type = bytes[4];
+    const payload = new DataView(bytes.buffer, bytes.byteOffset + 20, PAYLOAD_SIZE);
+    const frame = {
+      type,
+      typeName: TYPES[type],
+      sequence: readU32(view, 8),
+      timestampMicros: readU64(view, 12),
+      payload: clonePayload(bytes)
+    };
+
+    switch (type) {
+      case 1:
+        frame.boardVersion = payload.getUint8(0);
+        frame.rows = payload.getUint8(1);
+        frame.cols = payload.getUint8(2);
+        frame.overlapRaw = payload.getUint8(3);
+        frame.overlapEnabled = frame.overlapRaw !== 0;
+        frame.debounceUs = readU32(payload, 4);
+        frame.overlapUs = readU32(payload, 8);
+        frame.maxHoldUs = readU32(payload, 12);
+        frame.keyPressMs = readU32(payload, 16);
+        frame.streamId = readU32(payload, 20);
+        frame.layerCount = payload.getUint16(24, true);
+        break;
+      case 2:
+      case 7:
+        frame.id = readU32(payload, 0);
+        frame.sampleMicros32 = readU32(payload, 4);
+        frame.row = payload.getUint8(8);
+        frame.col = payload.getUint8(9);
+        frame.pressedRaw = payload.getUint8(10);
+        frame.pressed = frame.pressedRaw !== 0;
+        frame.slot = payload.getUint8(11);
+        break;
+      case 3:
+        frame.id = readU32(payload, 0);
+        frame.reason = payload.getUint8(4);
+        frame.slot = payload.getUint8(5);
+        break;
+      case 4:
+        frame.primaryID = readU32(payload, 0);
+        frame.relatedID = readU32(payload, 4);
+        frame.action = payload.getUint8(8);
+        frame.layerMask = payload.getUint8(9);
+        frame.interveningCount = payload.getUint8(10);
+        break;
+      case 5:
+        frame.reportLength = payload.getUint8(0);
+        frame.successRaw = payload.getUint8(1);
+        frame.success = frame.successRaw !== 0;
+        frame.sendDurationUs = readU32(payload, 2);
+        frame.report = Array.from(bytes.slice(26, 46)).slice(0, frame.reportLength);
+        break;
+      case 6:
+        frame.count = payload.getUint16(0, true);
+        frame.head = payload.getUint8(2);
+        frame.tail = payload.getUint8(3);
+        frame.checkpointID = readU32(payload, 4);
+        break;
+      case 8:
+        frame.count = payload.getUint16(0, true);
+        frame.checkpointID = readU32(payload, 4);
+        break;
+      case 9:
+        frame.totalDropped = readU32(payload, 0);
+        break;
+      case 10:
+        frame.chipIndex = payload.getUint8(0);
+        break;
+      case 11:
+        frame.head = payload.getUint8(0);
+        frame.tail = payload.getUint8(1);
+        break;
+      case 12:
+        frame.keyboardSuccessRaw = payload.getUint8(0);
+        frame.mediaSuccessRaw = payload.getUint8(1);
+        frame.keyboardDurationUs = readU32(payload, 2);
+        frame.mediaDurationUs = readU32(payload, 6);
+        frame.keyboardReport = Array.from(bytes.slice(30, 39));
+        frame.mediaReport = Array.from(bytes.slice(39, 41));
+        break;
+      case 13:
+        frame.layerMask = payload.getUint8(0);
+        frame.nameLength = payload.getUint8(1);
+        frame.layerName = String.fromCharCode(...bytes.slice(22, 22 + Math.min(frame.nameLength, 24)));
+        break;
+    }
+    return frame;
+  }
+
+  function jsonSafe(value) {
+    if (typeof value === 'bigint') return value.toString();
+    if (Array.isArray(value)) return value.map(jsonSafe);
+    if (value && typeof value === 'object') {
+      const out = {};
+      for (const [k, v] of Object.entries(value)) out[k] = jsonSafe(v);
+      return out;
+    }
+    return value;
+  }
+
+  class TraceModel {
+    constructor(options = {}) {
+      this.maxEvents = options.maxEvents || 2000;
+      this.resetAll();
+    }
+
+    resetAll() {
+      this.events = [];
+      this.queue = [];
+      this.queueKnown = false;
+      this.hello = null;
+      this.streamId = null;
+      this.expectedSequence = null;
+      this.pendingSnapshot = null;
+      this.nextEventId = 1;
+      this.lastVisibleTimestamp = null;
+      this.issues = [];
+      this.lastHidReports = new Map();
+      this.lastFrameTimestamp = null;
+      this.resetLayerNames();
+    }
+
+    clearVisible() {
+      this.events = [];
+      this.lastVisibleTimestamp = null;
+    }
+
+    resetLayerNames() {
+      this.layerNames = {};
+      this.pendingLayerNames = null;
+    }
+
+    beginLiveSession(label = 'Live connection boundary') {
+      this.queueKnown = false;
+      this.pendingSnapshot = null;
+      this.expectedSequence = null;
+      this.hello = null;
+      this.streamId = null;
+      this.lastHidReports = new Map();
+      this.lastFrameTimestamp = null;
+      this.resetLayerNames();
+      return this.addEvent(DETAILS, label, 'Parser/model live state reset for a new serial connection. Earlier visible events are preserved, but queue is unknown until the next complete checkpoint.', { timestampMicros: this.lastVisibleTimestamp, sequence: null, typeName: 'LOCAL' }, { severity: 'muted' });
+    }
+
+    applyRecord(record) {
+      if (!record.ok) {
+        return [this.addIssue(record.error, null)];
+      }
+      return this.applyFrame(record.frame);
+    }
+
+    applyFrame(frame) {
+      const generated = [];
+      if (this.lastFrameTimestamp !== null && frame.timestampMicros < this.lastFrameTimestamp) {
+        this.resetLayerNames();
+        this.queueKnown = false;
+        this.pendingSnapshot = null;
+        this.lastHidReports.clear();
+        generated.push(this.addEvent(INTERNAL, 'Device clock reset', 'A new device clock epoch started; queue and HID baselines are unknown.', frame, { severity: 'warn' }));
+      }
+      this.lastFrameTimestamp = frame.timestampMicros;
+      if (this.expectedSequence !== null && frame.sequence !== this.expectedSequence) {
+        this.resetLayerNames();
+        this.queueKnown = false;
+        this.pendingSnapshot = null;
+        this.lastHidReports.clear();
+        generated.push(this.addEvent(INTERNAL, 'Sequence gap', `Expected ${this.expectedSequence}, received ${frame.sequence}. Queue state is unknown until a complete checkpoint.`, frame, { severity: 'warn' }));
+      }
+      this.expectedSequence = (frame.sequence + 1) >>> 0;
+
+      const malformed = this.validateFramePayload(frame);
+      if (malformed) {
+        generated.push(this.addIssue(malformed, frame));
+        return generated;
+      }
+
+      if (this.pendingLayerNames && frame.type !== 13) {
+        generated.push(this.addIssue('Layer-name metadata interrupted; names remain unknown until a complete metadata set.', frame));
+      }
+      if (this.pendingSnapshot && frame.type !== 7 && frame.type !== 8) {
+        this.pendingSnapshot = null;
+        this.queueKnown = false;
+        generated.push(this.addEvent(INTERNAL, 'Checkpoint interrupted', `${frame.typeName} arrived before SNAPSHOT_END; queue state remains unknown until a complete uninterrupted checkpoint.`, frame, { severity: 'warn' }));
+      }
+
+      switch (frame.type) {
+        case 1:
+          generated.push(this.handleHello(frame));
+          break;
+        case 2:
+          generated.push(this.handleInput(frame));
+          break;
+        case 3:
+          generated.push(this.handleRemove(frame));
+          break;
+        case 4:
+          generated.push(this.handleDecision(frame));
+          break;
+        case 5:
+          generated.push(this.handleHid(frame));
+          break;
+        case 12:
+          generated.push(this.handleOutput(frame));
+          break;
+        case 13:
+          generated.push(this.handleLayerName(frame));
+          break;
+        case 6:
+          generated.push(this.handleSnapshotBegin(frame));
+          break;
+        case 7:
+          generated.push(this.handleSnapshotEntry(frame));
+          break;
+        case 8:
+          generated.push(this.handleSnapshotEnd(frame));
+          break;
+        case 9:
+          this.resetLayerNames();
+          this.queueKnown = false;
+          this.pendingSnapshot = null;
+          this.lastHidReports.clear();
+          generated.push(this.addEvent(INTERNAL, 'Trace frame loss', `${frame.totalDropped} dropped trace frame(s) reported by firmware in this stream. Queue state is unknown until checkpoint.`, frame, { severity: 'warn' }));
+          break;
+        case 10:
+          generated.push(this.addEvent(INTERNAL, 'I2C reset', `MCP23008 chip ${frame.chipIndex} reset.`, frame));
+          break;
+        case 11:
+          this.queueKnown = false;
+          this.pendingSnapshot = null;
+          generated.push(this.addEvent(INTERNAL, 'Queue overflow', `Observer queue overflow at head ${frame.head}, tail ${frame.tail}; queue state unknown until checkpoint.`, frame, { severity: 'warn' }));
+          break;
+      }
+      return generated.filter(Boolean);
+    }
+
+    handleHello(frame) {
+      const changedStream = this.streamId !== null && this.streamId !== frame.streamId;
+      this.hello = {
+        boardVersion: frame.boardVersion,
+        rows: frame.rows,
+        cols: frame.cols,
+        overlapEnabled: frame.overlapEnabled,
+        debounceUs: frame.debounceUs,
+        overlapUs: frame.overlapUs,
+        maxHoldUs: frame.maxHoldUs,
+        keyPressMs: frame.keyPressMs,
+        streamId: frame.streamId,
+        layerCount: frame.layerCount
+      };
+      this.resetLayerNames();
+      if (frame.layerCount) this.pendingLayerNames = { count: frame.layerCount, nextMask: 0, names: {} };
+      this.streamId = frame.streamId;
+      if (changedStream) {
+        this.queueKnown = false;
+        this.pendingSnapshot = null;
+        this.lastHidReports.clear();
+      }
+      const title = changedStream ? 'New trace stream' : 'HELLO checkpoint';
+      const detail = `board v${frame.boardVersion}, ${frame.rows}x${frame.cols}, stream ${frame.streamId}, debounce ${frame.debounceUs}µs, overlap ${frame.overlapEnabled ? frame.overlapUs + 'µs' : 'off'}. HELLO does not establish queue contents.`;
+      return this.addEvent(CHECKPOINT, title, detail, frame, { severity: changedStream ? 'info' : 'muted' });
+    }
+
+    handleLayerName(frame) {
+      const pending = this.pendingLayerNames;
+      if (!pending || frame.layerMask !== pending.nextMask) {
+        return this.addIssue(`Unexpected layer-name mask ${frame.layerMask}; a complete ordered metadata set is required.`, frame);
+      }
+      pending.names[frame.layerMask] = frame.layerName;
+      if (++pending.nextMask === pending.count) {
+        this.layerNames = pending.names;
+        this.pendingLayerNames = null;
+      }
+      return null;
+    }
+
+    handleInput(frame) {
+      const problem = this.validateKey(frame);
+      if (problem) return this.addIssue(`Invalid input frame: ${problem}`, frame);
+      const item = {
+        id: frame.id,
+        row: frame.row,
+        col: frame.col,
+        pressed: frame.pressed,
+        slot: frame.slot,
+        sampleMicros32: frame.sampleMicros32
+      };
+      if (this.queueKnown) {
+        if (this.queue.length === MAX_QUEUE_ENTRIES) return this.addIssue('INPUT exceeds processing queue capacity; queue invalidated.', frame);
+        const conflict = this.queue.find(q => q.id === item.id || q.slot === item.slot);
+        if (conflict) {
+          return this.addIssue(`INPUT id ${item.id}/slot ${item.slot} duplicates queued id ${conflict.id}/slot ${conflict.slot}; queue invalidated.`, frame);
+        }
+        this.queue.push(item);
+      }
+      return this.addEvent(INPUT, `${frame.pressed ? 'press' : 'release'} row ${frame.row + 1} column ${frame.col + 1}`, `id ${frame.id}, raw row ${frame.row}, col ${frame.col} (zero-based), slot ${frame.slot}, sampled ${frame.sampleMicros32}µs.`, frame);
+    }
+
+    handleRemove(frame) {
+      const reason = REMOVE_REASONS[frame.reason] || `unknown(${frame.reason})`;
+      if (!REMOVE_REASONS[frame.reason]) return this.addIssue(`Unknown REMOVE reason ${frame.reason}; queue invalidated.`, frame);
+      if (this.queueKnown) {
+        const index = this.queue.findIndex(q => q.id === frame.id && q.slot === frame.slot);
+        if (index < 0) {
+          const near = this.queue.find(q => q.id === frame.id || q.slot === frame.slot);
+          return this.addIssue(`REMOVE id ${frame.id}/slot ${frame.slot} did not match a queued entry${near ? ` (found id ${near.id}/slot ${near.slot})` : ''}; queue invalidated.`, frame);
+        }
+        this.queue.splice(index, 1);
+      }
+      return this.addEvent(DETAILS, 'Queue remove', `id ${frame.id}, slot ${frame.slot}, reason ${reason}.`, frame);
+    }
+
+    handleDecision(frame) {
+      const action = ACTIONS[frame.action] || `unknown(${frame.action})`;
+      if (!ACTIONS[frame.action]) {
+        return this.addEvent(INTERNAL, 'Invalid decision', `Unknown action ${frame.action} for primary ${frame.primaryID}.`, frame, { severity: 'error' });
+      }
+      const layerName = frame.action === 9 ? this.layerNames[frame.layerMask] || null : null;
+      return this.addEvent(decisionKind(frame.action), INTERNAL_ACTIONS[frame.action] || 'Decision: ' + action, `primary ${frame.primaryID}, related ${frame.relatedID}, layer mask 0x${frame.layerMask.toString(16)}${layerName ? ` (${layerName})` : ''}, intervening ${frame.interveningCount}.`, frame, { layerName });
+    }
+
+    handleHid(frame) {
+      const validLength = (frame.reportLength === 9 && frame.report[0] === 1) || (frame.reportLength === 2 && frame.report[0] === 3);
+      const bytes = frame.report.map(b => b.toString(16).padStart(2, '0')).join(' ');
+      const interpreted = validLength ? this.describeHid(frame) : 'Invalid report ID/length (keyboard requires ID 1 length 9; media requires ID 3 length 2).';
+      return this.addEvent(OUTPUT, outputTitle([frame.report], frame.success), `${interpreted} length ${frame.reportLength}, duration ${frame.sendDurationUs}µs, bytes [${bytes}]. API submission does not prove host receipt.`, frame, { severity: frame.success && validLength ? 'info' : 'warn' });
+    }
+
+    handleOutput(frame) {
+      const keyboardSuccess = frame.keyboardSuccessRaw === 1;
+      const mediaSuccess = frame.mediaSuccessRaw === 1;
+      const keyboard = this.describeHid({ report: frame.keyboardReport, success: keyboardSuccess });
+      const media = this.describeHid({ report: frame.mediaReport, success: mediaSuccess });
+      return this.addEvent(OUTPUT, outputTitle([frame.keyboardReport, frame.mediaReport], keyboardSuccess && mediaSuccess),
+        `Keyboard ${keyboardSuccess ? 'submitted' : 'FAILED'} (${frame.keyboardDurationUs}µs): ${keyboard}\nMedia ${mediaSuccess ? 'submitted' : 'FAILED'} (${frame.mediaDurationUs}µs): ${media}\nAPI submission does not prove host receipt.`,
+        frame, { severity: keyboardSuccess && mediaSuccess ? 'info' : 'warn' });
+    }
+
+    handleSnapshotBegin(frame) {
+      if (frame.count > MAX_QUEUE_ENTRIES) {
+        return this.addIssue(`SNAPSHOT_BEGIN count ${frame.count} exceeds ${MAX_QUEUE_ENTRIES}; queue invalidated.`, frame);
+      }
+      this.pendingSnapshot = {
+        count: frame.count,
+        head: frame.head,
+        tail: frame.tail,
+        checkpointID: frame.checkpointID,
+        entries: [],
+        ids: new Set(),
+        slots: new Set(),
+        timestampMicros: frame.timestampMicros,
+        sequence: frame.sequence
+      };
+      return null;
+    }
+
+    handleSnapshotEntry(frame) {
+      if (!this.pendingSnapshot) {
+        this.queueKnown = false;
+        return this.addIssue(`Snapshot entry ${frame.id} arrived without a matching begin; queue remains unknown.`, frame);
+      }
+      const problem = this.validateKey(frame);
+      if (problem) {
+        return this.addIssue(`Invalid snapshot entry: ${problem}`, frame);
+      }
+      if (this.pendingSnapshot.entries.length >= this.pendingSnapshot.count || this.pendingSnapshot.entries.length >= MAX_QUEUE_ENTRIES) {
+        return this.addIssue(`Snapshot has more entries than declared count ${this.pendingSnapshot.count}; queue invalidated.`, frame);
+      }
+      if (this.pendingSnapshot.ids.has(frame.id) || this.pendingSnapshot.slots.has(frame.slot)) {
+        return this.addIssue(`Snapshot duplicate id/slot (${frame.id}/${frame.slot}); queue invalidated.`, frame);
+      }
+      this.pendingSnapshot.ids.add(frame.id);
+      this.pendingSnapshot.slots.add(frame.slot);
+      this.pendingSnapshot.entries.push({
+        id: frame.id,
+        row: frame.row,
+        col: frame.col,
+        pressed: frame.pressed,
+        slot: frame.slot,
+        sampleMicros32: frame.sampleMicros32
+      });
+    }
+
+    handleSnapshotEnd(frame) {
+      if (!this.pendingSnapshot) {
+        this.queueKnown = false;
+        return this.addEvent(INTERNAL, 'Checkpoint rejected', `SNAPSHOT_END ${frame.checkpointID} arrived without a valid uninterrupted begin.`, frame, { severity: 'warn' });
+      }
+      const snap = this.pendingSnapshot;
+      this.pendingSnapshot = null;
+      if (snap.checkpointID !== frame.checkpointID || snap.count !== frame.count || snap.entries.length !== frame.count) {
+        this.queueKnown = false;
+        return this.addEvent(INTERNAL, 'Checkpoint rejected', `Expected checkpoint ${snap.checkpointID} with ${snap.count} entries, got checkpoint ${frame.checkpointID} with ${frame.count} end count and ${snap.entries.length} entries.`, frame, { severity: 'warn' });
+      }
+      const ringProblem = this.validateSnapshotRing(snap);
+      if (ringProblem) return this.addIssue(ringProblem, frame);
+      this.queue = snap.entries.slice();
+      this.queueKnown = true;
+      return this.addEvent(CHECKPOINT, 'Queue checkpoint', `Checkpoint ${frame.checkpointID}: ${frame.count} queued event(s), head ${snap.head}, tail ${snap.tail}.`, frame, { severity: 'checkpoint' });
+    }
+
+    validateKey(frame) {
+      if (!this.hello) return null;
+      if (frame.row >= this.hello.rows || frame.col >= this.hello.cols) {
+        this.queueKnown = false;
+        return `Coordinate row ${frame.row}, col ${frame.col} is outside HELLO dimensions ${this.hello.rows}x${this.hello.cols}; queue state invalidated.`;
+      }
+      return null;
+    }
+
+    validateFramePayload(frame) {
+      if (frame.type === 1) {
+        if (frame.rows < 1 || frame.rows > 32 || frame.cols < 1 || frame.cols > 32) return `Invalid HELLO dimensions ${frame.rows}x${frame.cols}.`;
+        if (frame.overlapRaw !== 0 && frame.overlapRaw !== 1) return `Invalid HELLO overlapEnabled value ${frame.overlapRaw}.`;
+        if (frame.layerCount > 256) return `Invalid HELLO layer count ${frame.layerCount}.`;
+      }
+      if (frame.type === 2 || frame.type === 7) {
+        if (frame.pressedRaw !== 0 && frame.pressedRaw !== 1) return `Invalid ${frame.typeName} pressed value ${frame.pressedRaw}.`;
+      }
+      if (frame.type === 3 && !REMOVE_REASONS[frame.reason]) return `Invalid REMOVE reason ${frame.reason}.`;
+      if (frame.type === 4 && !ACTIONS[frame.action]) return `Invalid DECISION action ${frame.action}.`;
+      if (frame.type === 5) {
+        if (frame.successRaw !== 0 && frame.successRaw !== 1) return `Invalid HID success value ${frame.successRaw}.`;
+        const validKeyboard = frame.reportLength === 9 && frame.report[0] === 1;
+        const validMedia = frame.reportLength === 2 && frame.report[0] === 3;
+        if (!validKeyboard && !validMedia) return `Invalid HID report ID/length: id ${frame.report[0] ?? 'none'}, length ${frame.reportLength}.`;
+      }
+      if (frame.type === 12) {
+        if (![0, 1].includes(frame.keyboardSuccessRaw) || ![0, 1].includes(frame.mediaSuccessRaw)) return 'Invalid HID_OUTPUT success value.';
+        if (frame.keyboardReport[0] !== 1 || frame.mediaReport[0] !== 3) return 'Invalid HID_OUTPUT report IDs.';
+      }
+      if (frame.type === 13 && (frame.nameLength < 1 || frame.nameLength > 24 || !/^[\x20-\x7e]{1,24}$/.test(frame.layerName) || !frame.layerName.trim())) {
+        return 'Invalid layer name: expected 1..24 printable ASCII bytes.';
+      }
+      if ((frame.type === 6 || frame.type === 8) && frame.count > MAX_QUEUE_ENTRIES) return `${frame.typeName} count ${frame.count} exceeds ${MAX_QUEUE_ENTRIES}.`;
+      return null;
+    }
+
+    validateSnapshotRing(snap) {
+      if (snap.count === 0) {
+        return snap.head === snap.tail ? null : `Empty checkpoint has head ${snap.head} but tail ${snap.tail}; queue invalidated.`;
+      }
+      const span = (snap.tail - snap.head + 256) & 0xff;
+      if (snap.count > span) return 'Checkpoint contains more live entries than physical ring slots.';
+      let previousDistance = -1;
+      for (let i = 0; i < snap.entries.length; i++) {
+        // Removed entries remain as tombstones, so live slots need not be adjacent.
+        const distance = (snap.entries[i].slot - snap.head + 256) & 0xff;
+        if ((i === 0 && distance !== 0) || distance <= previousDistance || distance >= span) {
+          return `Checkpoint entry ${i} has slot ${snap.entries[i].slot} outside ordered head/tail range.`;
+        }
+        previousDistance = distance;
+      }
+      return null;
+    }
+
+    describeHid(frame) {
+      const id = frame.report[0];
+      const key = String(id);
+      const previous = this.lastHidReports.get(key);
+      if (frame.success) this.lastHidReports.set(key, frame.report.slice());
+      else this.lastHidReports.delete(key);
+      if (id === 1) {
+        const modifiers = KEYBOARD_MODIFIERS.filter((_, bit) => (frame.report[1] & (1 << bit)) !== 0);
+        const keys = frame.report.slice(3, 9).filter(Boolean);
+        const prefix = previous ? this.describeKeyboardDiff(previous, frame.report) : 'keyboard baseline';
+        return `${prefix}: modifiers [${modifiers.join(', ') || 'none'}], keys [${keys.map(k => '0x' + k.toString(16).padStart(2, '0')).join(', ') || 'none'}].`;
+      }
+      const bits = frame.report[1];
+      const active = MEDIA_BITS.filter((_, bit) => (bits & (1 << bit)) !== 0);
+      const prefix = previous ? this.describeMediaDiff(previous, frame.report) : 'media baseline';
+      return `${prefix}: media [${active.join(', ') || 'none'}].`;
+    }
+
+    describeKeyboardDiff(previous, current) {
+      const oldMods = previous[1] || 0;
+      const newMods = current[1] || 0;
+      const pressedMods = KEYBOARD_MODIFIERS.filter((_, bit) => !(oldMods & (1 << bit)) && (newMods & (1 << bit)));
+      const releasedMods = KEYBOARD_MODIFIERS.filter((_, bit) => (oldMods & (1 << bit)) && !(newMods & (1 << bit)));
+      const oldKeys = new Set(previous.slice(3, 9).filter(Boolean));
+      const newKeys = new Set(current.slice(3, 9).filter(Boolean));
+      const pressed = [...newKeys].filter(k => !oldKeys.has(k)).map(k => '0x' + k.toString(16).padStart(2, '0'));
+      const released = [...oldKeys].filter(k => !newKeys.has(k)).map(k => '0x' + k.toString(16).padStart(2, '0'));
+      const parts = [];
+      if (pressed.length || pressedMods.length) parts.push(`pressed ${[...pressedMods, ...pressed].join(', ')}`);
+      if (released.length || releasedMods.length) parts.push(`released ${[...releasedMods, ...released].join(', ')}`);
+      return parts.join('; ') || 'keyboard unchanged';
+    }
+
+    describeMediaDiff(previous, current) {
+      const oldBits = previous[1] || 0;
+      const newBits = current[1] || 0;
+      const pressed = MEDIA_BITS.filter((_, bit) => !(oldBits & (1 << bit)) && (newBits & (1 << bit)));
+      const released = MEDIA_BITS.filter((_, bit) => (oldBits & (1 << bit)) && !(newBits & (1 << bit)));
+      const parts = [];
+      if (pressed.length) parts.push(`pressed ${pressed.join(', ')}`);
+      if (released.length) parts.push(`released ${released.join(', ')}`);
+      return parts.join('; ') || 'media unchanged';
+    }
+
+    addIssue(message, frame) {
+      this.resetLayerNames();
+      this.queueKnown = false;
+      this.pendingSnapshot = null;
+      this.lastHidReports.clear();
+      this.issues.push({ message, sequence: frame ? frame.sequence : null });
+      if (this.issues.length > MAX_ISSUES) this.issues.splice(0, this.issues.length - MAX_ISSUES);
+      return this.addEvent(INTERNAL, 'Parser/protocol issue', message, frame || { timestampMicros: this.lastVisibleTimestamp, sequence: null }, { severity: 'error' });
+    }
+
+    addEvent(kind, title, detail, frame, options = {}) {
+      const ts = frame && frame.timestampMicros !== undefined && frame.timestampMicros !== null ? BigInt(frame.timestampMicros) : this.lastVisibleTimestamp;
+      let deltaUs = null;
+      if (ts !== null && this.lastVisibleTimestamp !== null && ts >= this.lastVisibleTimestamp) {
+        deltaUs = Number(ts - this.lastVisibleTimestamp);
+      }
+      if (ts !== null) this.lastVisibleTimestamp = ts;
+      const event = {
+        id: this.nextEventId++,
+        kind,
+        title,
+        detail,
+        sequence: frame ? frame.sequence : null,
+        typeName: frame && frame.typeName ? frame.typeName : 'LOCAL',
+        timestampMicros: ts,
+        deltaUs,
+        severity: options.severity || 'info',
+        layerName: options.layerName || null,
+        queueKnown: this.queueKnown,
+        queueAfter: this.queueKnown ? this.queue.map(q => ({ ...q })) : null,
+        raw: frame ? jsonSafe(frame) : null
+      };
+      this.events.push(event);
+      if (this.events.length > this.maxEvents) this.events.splice(0, this.events.length - this.maxEvents);
+      return event;
+    }
+
+    serialize() {
+      return {
+        format: 'KBT_TRACE_MODEL_V1',
+        exportedAt: new Date().toISOString(),
+        maxEvents: this.maxEvents,
+        queueKnown: this.queueKnown,
+        queue: this.queue,
+        hello: this.hello,
+        streamId: this.streamId,
+        layerNames: { ...this.layerNames },
+        expectedSequence: this.expectedSequence,
+        nextEventId: this.nextEventId,
+        events: jsonSafe(this.events),
+        issues: this.issues
+      };
+    }
+
+    importState(state) {
+      const next = this.validateImportState(state);
+      this.queueKnown = next.queueKnown;
+      this.queue = next.queue;
+      this.hello = next.hello;
+      this.streamId = next.streamId;
+      this.layerNames = next.layerNames;
+      this.pendingLayerNames = null;
+      this.expectedSequence = next.expectedSequence;
+      this.nextEventId = next.nextEventId;
+      this.issues = next.issues;
+      this.events = next.events;
+      this.pendingSnapshot = null;
+      this.lastHidReports = new Map();
+      this.lastVisibleTimestamp = this.events.length ? this.events[this.events.length - 1].timestampMicros : null;
+    }
+
+    validateImportState(state) {
+      if (!state || state.format !== 'KBT_TRACE_MODEL_V1' || !Array.isArray(state.events)) throw new Error('Not a KBT trace export.');
+      const cleanQueue = this.validateQueueArray(state.queue || [], 'queue');
+      const cleanEvents = state.events.slice(-this.maxEvents).map((e, index) => this.validateEvent(e, index));
+      const maxId = cleanEvents.reduce((m, e) => Math.max(m, e.id), 0);
+      return {
+        queueKnown: !!state.queueKnown,
+        queue: cleanQueue,
+        hello: state.hello === null || state.hello === undefined ? null : this.validateHelloImport(state.hello),
+        streamId: safeOptionalUint32(state.streamId, 'streamId'),
+        layerNames: this.validateLayerNames(state.layerNames),
+        expectedSequence: safeOptionalUint32(state.expectedSequence, 'expectedSequence'),
+        nextEventId: Math.max(safeOptionalPositiveInt(state.nextEventId, 'nextEventId') || 1, maxId + 1),
+        issues: Array.isArray(state.issues) ? state.issues.slice(-MAX_ISSUES).map((issue, index) => ({
+          message: safeString(issue && issue.message, `issues[${index}].message`, 500),
+          sequence: safeOptionalUint32(issue && issue.sequence, `issues[${index}].sequence`)
+        })) : [],
+        events: cleanEvents
+      };
+    }
+
+    validateHelloImport(hello) {
+      return {
+        boardVersion: safeByte(hello.boardVersion, 'hello.boardVersion'),
+        rows: safeRange(hello.rows, 'hello.rows', 1, 32),
+        cols: safeRange(hello.cols, 'hello.cols', 1, 32),
+        overlapEnabled: !!hello.overlapEnabled,
+        debounceUs: safeUint32(hello.debounceUs, 'hello.debounceUs'),
+        overlapUs: safeUint32(hello.overlapUs, 'hello.overlapUs'),
+        maxHoldUs: safeUint32(hello.maxHoldUs, 'hello.maxHoldUs'),
+        keyPressMs: safeUint32(hello.keyPressMs, 'hello.keyPressMs'),
+        streamId: safeUint32(hello.streamId, 'hello.streamId'),
+        layerCount: safeRange(hello.layerCount ?? 0, 'hello.layerCount', 0, 256)
+      };
+    }
+
+    validateLayerNames(names) {
+      if (names === undefined) return {};
+      if (!names || typeof names !== 'object' || Array.isArray(names)) throw new Error('layerNames must be a mask/name object.');
+      const result = {};
+      for (const [mask, name] of Object.entries(names)) {
+        if (!/^(0|[1-9]\d{0,2})$/.test(mask) || Number(mask) > 255) throw new Error('Invalid layer-name mask.');
+        result[mask] = safeLayerName(name);
+      }
+      return result;
+    }
+
+    validateEvent(e, index) {
+      if (!e || typeof e !== 'object') throw new Error(`events[${index}] is not an object.`);
+      const timestampMicros = e.timestampMicros === null || e.timestampMicros === undefined ? null : BigInt(String(e.timestampMicros));
+      const queueKnown = !!e.queueKnown;
+      let kind = KIND_SET.has(e.kind) ? e.kind : fail(`events[${index}].kind is invalid.`);
+      // Older captures classified successful checkpoints as internal events.
+      if (kind === INTERNAL && (
+        (e.typeName === 'HELLO' && ['muted', 'info'].includes(e.severity)) ||
+        (e.typeName === 'SNAPSHOT_END' && e.severity === 'checkpoint')
+      )) kind = CHECKPOINT;
+      if (kind === INTERNAL && e.severity === 'info') {
+        if (e.typeName === 'DECISION' && Object.hasOwn(ACTIONS, e.raw?.action)) kind = decisionKind(e.raw.action);
+        if (e.typeName === 'REMOVE' && e.title === 'Queue remove') kind = DETAILS;
+      }
+      if (kind === INTERNAL && e.typeName === 'LOCAL' && ['New live connection', 'Live connection boundary'].includes(e.title)) kind = DETAILS;
+      return {
+        id: safeOptionalPositiveInt(e.id, `events[${index}].id`) || index + 1,
+        kind,
+        title: safeString(e.title, `events[${index}].title`, 512),
+        detail: safeString(e.detail, `events[${index}].detail`, 2000),
+        sequence: safeOptionalUint32(e.sequence, `events[${index}].sequence`),
+        typeName: safeString(e.typeName || 'LOCAL', `events[${index}].typeName`, 40),
+        timestampMicros,
+        deltaUs: e.deltaUs === null || e.deltaUs === undefined ? null : safeNonNegativeNumber(e.deltaUs, `events[${index}].deltaUs`),
+        severity: safeString(e.severity || 'info', `events[${index}].severity`, 20),
+        layerName: e.layerName == null ? null : safeLayerName(e.layerName),
+        queueKnown,
+        queueAfter: queueKnown ? this.validateQueueArray(e.queueAfter || [], `events[${index}].queueAfter`) : null,
+        raw: e.raw === undefined ? null : e.raw
+      };
+    }
+
+    validateQueueArray(queue, label) {
+      if (!Array.isArray(queue)) throw new Error(`${label} must be an array.`);
+      if (queue.length > MAX_QUEUE_ENTRIES) throw new Error(`${label} has ${queue.length} entries; max ${MAX_QUEUE_ENTRIES}.`);
+      const ids = new Set();
+      const slots = new Set();
+      return queue.map((q, index) => {
+        const item = {
+          id: safeUint32(q && q.id, `${label}[${index}].id`),
+          row: safeByte(q && q.row, `${label}[${index}].row`),
+          col: safeByte(q && q.col, `${label}[${index}].col`),
+          pressed: typeof (q && q.pressed) === 'boolean' ? q.pressed : fail(`${label}[${index}].pressed must be boolean.`),
+          slot: safeByte(q && q.slot, `${label}[${index}].slot`),
+          sampleMicros32: safeUint32(q && q.sampleMicros32, `${label}[${index}].sampleMicros32`)
+        };
+        if (ids.has(item.id) || slots.has(item.slot)) throw new Error(`${label} has duplicate id or slot.`);
+        ids.add(item.id);
+        slots.add(item.slot);
+        return item;
+      });
+    }
+  }
+
+  const KIND_SET = new Set([INPUT, INTERNAL, OUTPUT, CHECKPOINT, DETAILS]);
+
+  function fail(message) {
+    throw new Error(message);
+  }
+
+  function safeString(value, label, maxLength) {
+    if (typeof value !== 'string') throw new Error(`${label} must be a string.`);
+    if (value.length > maxLength) throw new Error(`${label} exceeds ${maxLength} characters.`);
+    return value;
+  }
+
+  function safeLayerName(value) {
+    if (typeof value !== 'string' || !/^[\x20-\x7e]{1,24}$/.test(value) || !value.trim()) throw new Error('Invalid layer name.');
+    return value;
+  }
+
+  function safeRange(value, label, min, max) {
+    if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${label} must be ${min}..${max}.`);
+    return value;
+  }
+
+  function safeByte(value, label) {
+    return safeRange(value, label, 0, 255);
+  }
+
+  function safeUint32(value, label) {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) throw new Error(`${label} must be uint32.`);
+    return value;
+  }
+
+  function safeOptionalUint32(value, label) {
+    if (value === null || value === undefined) return null;
+    return safeUint32(value, label);
+  }
+
+  function safeOptionalPositiveInt(value, label) {
+    if (value === null || value === undefined) return null;
+    if (!Number.isInteger(value) || value < 1 || value > Number.MAX_SAFE_INTEGER) throw new Error(`${label} must be a positive integer.`);
+    return value;
+  }
+
+  function safeNonNegativeNumber(value, label) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error(`${label} must be a non-negative number.`);
+    return value;
+  }
+
+  return {
+    FRAME_SIZE,
+    PAYLOAD_SIZE,
+    MAGIC,
+    TYPES,
+    INPUT,
+    INTERNAL,
+    OUTPUT,
+    CHECKPOINT,
+    DETAILS,
+    REMOVE_REASONS,
+    ACTIONS,
+    MAX_IMPORT_BYTES,
+    KEYBOARD_LAYOUTS,
+    keyName,
+    eventTitle,
+    eventPresentation,
+    TraceParser,
+    TraceModel,
+    crc16CcittFalse
+  };
+});
+
+  </script>
+  <script>
+(function (root) {
+  'use strict';
+
+  const trace = root.KBTTrace;
+  if (!trace) throw new Error('KBTTrace must be loaded before app.js');
+
+  const KIND_FILTERS = ['INPUT', 'INTERNAL', 'OUTPUT', 'DETAILS', 'CHECKPOINT'];
+  const MAX_RENDERED_EVENTS = 300;
+  const RENDER_INTERVAL_MS = 50;
+  const LAYOUT_STORAGE_KEY = 'keyboard-trace.layout';
+
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  function formatMicros(value) {
+    if (value === null || value === undefined) return '—';
+    const n = typeof value === 'bigint' ? Number(value) : value;
+    if (!Number.isFinite(n)) return String(value) + 'µs';
+    if (Math.abs(n) < 1000) return `${n}µs`;
+    if (Math.abs(n) < 1000000) return `${(n / 1000).toFixed(3)}ms`;
+    return `${(n / 1000000).toFixed(3)}s`;
+  }
+
+  function downloadText(filename, text) {
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function makeFrame(type, seq, micros, fillPayload) {
+    const bytes = new Uint8Array(trace.FRAME_SIZE);
+    bytes.set(trace.MAGIC, 0);
+    bytes[4] = type;
+    const view = new DataView(bytes.buffer);
+    view.setUint32(8, seq, true);
+    view.setBigUint64(12, BigInt(micros), true);
+    const payload = new DataView(bytes.buffer, 20, trace.PAYLOAD_SIZE);
+    fillPayload(payload, bytes);
+    view.setUint16(46, trace.crc16CcittFalse(bytes, 0, 46), true);
+    return bytes;
+  }
+
+  function demoFrames() {
+    let seq = 1;
+    const frames = [];
+    frames.push(makeFrame(1, seq++, 1000000, p => {
+      p.setUint8(0, 2); p.setUint8(1, 4); p.setUint8(2, 5); p.setUint8(3, 1);
+      p.setUint32(4, 5000, true); p.setUint32(8, 35000, true); p.setUint32(12, 180000, true); p.setUint32(16, 120, true); p.setUint32(20, 4242, true);
+    }));
+    frames.push(makeFrame(6, seq++, 1000500, p => { p.setUint16(0, 0, true); p.setUint8(2, 0); p.setUint8(3, 0); p.setUint32(4, 1, true); }));
+    frames.push(makeFrame(8, seq++, 1000510, p => { p.setUint16(0, 0, true); p.setUint32(4, 1, true); }));
+    frames.push(makeFrame(2, seq++, 1004000, p => { p.setUint32(0, 100, true); p.setUint32(4, 1003900, true); p.setUint8(8, 1); p.setUint8(9, 2); p.setUint8(10, 1); p.setUint8(11, 0); }));
+    frames.push(makeFrame(4, seq++, 1009000, p => { p.setUint32(0, 100, true); p.setUint32(4, 0, true); p.setUint8(8, 1); p.setUint8(9, 0); p.setUint8(10, 0); }));
+    frames.push(makeFrame(4, seq++, 1043000, p => { p.setUint32(0, 100, true); p.setUint32(4, 0, true); p.setUint8(8, 8); p.setUint8(9, 1); p.setUint8(10, 0); }));
+    frames.push(makeFrame(12, seq++, 1043800, (p, b) => {
+      p.setUint8(0, 1); p.setUint8(1, 1); p.setUint32(2, 420, true); p.setUint32(6, 80, true);
+      b.set([1, 64, 0, 33, 0, 0, 0, 0, 0, 3, 0], 30);
+    }));
+    frames.push(makeFrame(3, seq++, 1044200, p => { p.setUint32(0, 100, true); p.setUint8(4, 1); p.setUint8(5, 0); }));
+    frames.push(makeFrame(2, seq++, 1180000, p => { p.setUint32(0, 101, true); p.setUint32(4, 1180000, true); p.setUint8(8, 3); p.setUint8(9, 1); p.setUint8(10, 1); p.setUint8(11, 1); }));
+    frames.push(makeFrame(11, seq++, 1180200, p => { p.setUint8(0, 2); p.setUint8(1, 1); }));
+    frames.push(makeFrame(6, seq++, 1200000, p => { p.setUint16(0, 1, true); p.setUint8(2, 1); p.setUint8(3, 2); p.setUint32(4, 2, true); }));
+    frames.push(makeFrame(7, seq++, 1200000, p => { p.setUint32(0, 101, true); p.setUint32(4, 1180000, true); p.setUint8(8, 3); p.setUint8(9, 1); p.setUint8(10, 1); p.setUint8(11, 1); }));
+    frames.push(makeFrame(8, seq++, 1200000, p => { p.setUint16(0, 1, true); p.setUint32(4, 2, true); }));
+    return frames;
+  }
+
+  class SerialTraceApp {
+    constructor() {
+      this.parser = new trace.TraceParser();
+      this.model = new trace.TraceModel({ maxEvents: 2000 });
+      this.port = null;
+      this.reader = null;
+      this.readLoopPromise = null;
+      this.cleanupPromise = null;
+      this.lastCleanupError = null;
+      this.reading = false;
+      this.connecting = false;
+      this.portOpened = false;
+      this.sessionDone = null;
+      this.seenHelloThisConnection = false;
+      this.waitingTimer = null;
+      this.follow = true;
+      this.filters = new Set(['INPUT', 'INTERNAL', 'OUTPUT']);
+      this.selectedEventId = null;
+      this.zoom = 1;
+      this.renderQueued = false;
+      this.lastRenderAt = 0;
+      this.keyboardLayout = 'en-US';
+    }
+
+    start() {
+      this.restoreLayout();
+      this.bindUi();
+      this.render();
+      this.setStatus(this.capabilityMessage(), 'idle');
+    }
+
+    bindUi() {
+      $('connectBtn').addEventListener('click', () => this.connect());
+      $('disconnectBtn').addEventListener('click', () => this.disconnect());
+      $('demoBtn').addEventListener('click', () => this.runDemo());
+      $('clearBtn').addEventListener('click', () => { this.model.clearVisible(); this.selectedEventId = null; this.render(); });
+      $('exportBtn').addEventListener('click', () => downloadText(`keyboard-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.json`, JSON.stringify(this.captureExport(), null, 2)));
+      $('importInput').addEventListener('change', event => this.importFile(event.target.files[0]));
+      $('followToggle').addEventListener('change', event => { this.follow = event.target.checked; });
+      $('zoom').addEventListener('input', event => { this.zoom = Number(event.target.value); this.render(); });
+      $('keyboardLayout').addEventListener('change', event => this.setKeyboardLayout(event.target.value));
+      for (const kind of KIND_FILTERS) {
+        const checkbox = $(`filter${kind}`);
+        checkbox.checked = this.filters.has(kind);
+        checkbox.addEventListener('change', event => {
+          if (event.target.checked) this.filters.add(kind); else this.filters.delete(kind);
+          this.render();
+        });
+      }
+    }
+
+    restoreLayout() {
+      try {
+        const saved = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+        if (saved !== null) {
+          if (Object.hasOwn(trace.KEYBOARD_LAYOUTS, saved)) this.keyboardLayout = saved;
+          else $('layoutNotice').textContent = 'Unknown saved layout; using English.';
+        }
+      } catch (error) {
+        $('layoutNotice').textContent = 'Layout preference is session-only.';
+        $('layoutNotice').title = `Browser storage unavailable: ${error.message}`;
+      }
+      $('keyboardLayout').value = this.keyboardLayout;
+    }
+
+    setKeyboardLayout(layout) {
+      if (!Object.hasOwn(trace.KEYBOARD_LAYOUTS, layout)) throw new Error(`Unsupported keyboard layout: ${layout}`);
+      this.keyboardLayout = layout;
+      $('keyboardLayout').value = layout;
+      try {
+        window.localStorage.setItem(LAYOUT_STORAGE_KEY, layout);
+        $('layoutNotice').textContent = '';
+        $('layoutNotice').title = '';
+      } catch (error) {
+        $('layoutNotice').textContent = 'Layout preference is session-only.';
+        $('layoutNotice').title = `Could not save layout: ${error.message}`;
+      }
+      const scrollTop = $('timeline').scrollTop;
+      this.render();
+      $('timeline').scrollTop = scrollTop;
+    }
+
+    captureExport() {
+      const capture = this.model.serialize();
+      capture.displayLayout = this.keyboardLayout;
+      capture.events = capture.events.map(event => ({ ...event, title: trace.eventTitle(event, this.keyboardLayout) }));
+      return capture;
+    }
+
+    capabilityMessage() {
+      if (!('serial' in navigator)) return 'Web Serial is not available in this browser. Use Chrome/Edge over HTTPS or a local file if supported.';
+      if (!window.isSecureContext) return 'Web Serial requires a secure context. Open this file locally or serve it over HTTPS.';
+      return 'Ready. Select a keyboard; no data leaves this page. Typed data may be sensitive.';
+    }
+
+    setStatus(message, state = 'idle') {
+      $('status').textContent = message;
+      $('status').className = `status ${state}`;
+    }
+
+    async connect() {
+      if (this.connecting || this.reading) return;
+      if (this.port) {
+        this.setStatus('The previous port could not be closed. Retry Disconnect before connecting.', 'error');
+        return;
+      }
+      if (!('serial' in navigator) || !window.isSecureContext) {
+        this.setStatus(this.capabilityMessage(), 'error');
+        return;
+      }
+      this.connecting = true;
+      let finishSession;
+      this.sessionDone = new Promise(resolve => { finishSession = resolve; });
+      this.seenHelloThisConnection = false;
+      this.parser.reset();
+      this.model.beginLiveSession('New live connection');
+      $('connectBtn').disabled = true;
+      this.setLiveControls(false);
+      this.scheduleRender();
+      try {
+        const port = await navigator.serial.requestPort();
+        this.port = port;
+        this.setStatus('Opening serial port at 115200 baud…', 'busy');
+        await port.open({ baudRate: 115200, bufferSize: 4096 });
+        this.portOpened = true;
+        if (typeof port.setSignals === 'function') await port.setSignals({ dataTerminalReady: true });
+        this.reading = true;
+        $('disconnectBtn').disabled = false;
+        this.setStatus('Connected. Waiting for valid KBT1 frames…', 'ok');
+        this.waitingTimer = setTimeout(() => {
+          if (this.reading && !this.seenHelloThisConnection) this.setStatus('Connected, but no valid HELLO received yet. Check firmware version, port, and baud rate.', 'busy');
+        }, 3000);
+        this.readLoopPromise = this.readLoop();
+        await this.readLoopPromise;
+      } catch (error) {
+        if (error && error.name === 'NotFoundError') this.setStatus('Device selection cancelled.', 'idle');
+        else this.setStatus(`Connection error: ${error.message || error}`, 'error');
+      } finally {
+        if (this.waitingTimer) clearTimeout(this.waitingTimer);
+        this.waitingTimer = null;
+        await this.cleanupPort();
+        this.connecting = false;
+        this.readLoopPromise = null;
+        $('connectBtn').disabled = !!this.port;
+        $('disconnectBtn').disabled = !this.port;
+        this.setLiveControls(!this.port);
+        finishSession();
+      }
+    }
+
+    async readLoop() {
+      let localReader = null;
+      try {
+        if (!this.port.readable) throw new Error('The selected port has no readable stream.');
+        localReader = this.port.readable.getReader();
+        this.reader = localReader;
+        while (this.reading) {
+          const { value, done } = await localReader.read();
+          if (done) {
+            if (this.reading) this.setStatus('Serial stream ended. Reconnect to continue.', 'idle');
+            break;
+          }
+          if (value && value.length) this.ingest(value);
+        }
+      } catch (error) {
+        if (this.reading) this.setStatus(`Serial read error or unplug: ${error.message || error}`, 'error');
+      } finally {
+        this.reading = false;
+        $('disconnectBtn').disabled = true;
+        if (localReader) localReader.releaseLock();
+        this.reader = null;
+      }
+    }
+
+    async disconnect() {
+      this.reading = false;
+      $('disconnectBtn').disabled = true;
+      const reader = this.reader;
+      if (reader) {
+        try { await reader.cancel(); } catch (error) { this.setStatus(`Reader cancel failed: ${error.message || error}`, 'error'); }
+      }
+      if (this.connecting) await this.sessionDone;
+      else await this.cleanupPort();
+      $('connectBtn').disabled = !!this.port;
+      $('disconnectBtn').disabled = !this.port;
+      this.setLiveControls(!this.port);
+      if (!this.lastCleanupError) this.setStatus('Disconnected. Existing timeline remains local.', 'idle');
+    }
+
+    async cleanupPort() {
+      if (this.cleanupPromise) return this.cleanupPromise;
+      this.cleanupPromise = this.doCleanupPort().finally(() => { this.cleanupPromise = null; });
+      return this.cleanupPromise;
+    }
+
+    async doCleanupPort() {
+      const port = this.port;
+      this.lastCleanupError = null;
+      this.reader = null;
+      if (this.waitingTimer) clearTimeout(this.waitingTimer);
+      this.waitingTimer = null;
+      if (port && this.portOpened) {
+        try {
+          await port.close();
+          this.port = null;
+          this.portOpened = false;
+        } catch (error) {
+          this.lastCleanupError = `Port close failed: ${error.message || error}`;
+          this.setStatus(this.lastCleanupError, 'error');
+        }
+      } else {
+        this.port = null;
+      }
+      this.reading = false;
+      $('disconnectBtn').disabled = true;
+    }
+
+    ingest(bytes) {
+      const records = this.parser.push(bytes);
+      let changed = false;
+      for (const record of records) {
+        const events = this.model.applyRecord(record);
+        if (!this.seenHelloThisConnection && record.ok && record.frame.type === 1 && !this.model.validateFramePayload(record.frame)) {
+          this.seenHelloThisConnection = true;
+          if (this.waitingTimer) clearTimeout(this.waitingTimer);
+          this.waitingTimer = null;
+          this.setStatus(`Receiving KBT1 stream ${record.frame.streamId}; waiting for checkpoint to establish queue.`, 'ok');
+        }
+        if (this.reading && this.seenHelloThisConnection) {
+          this.setStatus(this.model.queueKnown
+            ? `Receiving KBT1 stream ${this.model.streamId}; ${this.model.queue.length} queued event(s).`
+            : 'Receiving KBT1; queue unknown until a complete checkpoint.', this.model.queueKnown ? 'ok' : 'busy');
+        }
+        if (events.length) changed = true;
+      }
+      if (changed) this.scheduleRender();
+    }
+
+    runDemo() {
+      if (this.connecting || this.reading) return;
+      this.parser.reset();
+      for (const frame of demoFrames()) this.ingest(frame);
+      this.setStatus('Demo trace loaded. Queue remains unknown until the first checkpoint, then follows events.', 'ok');
+    }
+
+    async importFile(file) {
+      if (!file) return;
+      if (this.connecting || this.reading) {
+        this.setStatus('Import is disabled while a live serial connection is active.', 'error');
+        $('importInput').value = '';
+        return;
+      }
+      if (file.size > trace.MAX_IMPORT_BYTES) {
+        this.setStatus(`Import failed: file is larger than ${Math.round(trace.MAX_IMPORT_BYTES / 1024 / 1024)} MiB.`, 'error');
+        $('importInput').value = '';
+        return;
+      }
+      try {
+        const text = await file.text();
+        this.model.importState(JSON.parse(text));
+        this.parser.reset();
+        this.selectedEventId = null;
+        this.setStatus(`Imported ${this.model.events.length} event(s). Live parser buffer reset; model state preserved from export.`, 'ok');
+        this.render();
+      } catch (error) {
+        this.setStatus(`Import failed: ${error.message || error}`, 'error');
+      } finally {
+        $('importInput').value = '';
+      }
+    }
+
+    scheduleRender() {
+      if (this.renderQueued) return;
+      this.renderQueued = true;
+      const delay = Math.max(0, RENDER_INTERVAL_MS - (Date.now() - this.lastRenderAt));
+      setTimeout(() => requestAnimationFrame(() => {
+        this.renderQueued = false;
+        this.lastRenderAt = Date.now();
+        this.render();
+      }), delay);
+    }
+
+    filteredEvents() {
+      return this.model.events.filter(e => this.filters.has(e.kind)).slice(-MAX_RENDERED_EVENTS);
+    }
+
+    render() {
+      const events = this.filteredEvents();
+      $('eventCount').textContent = `${this.model.events.length} retained / ${events.length} shown`;
+      $('queueState').textContent = this.model.queueKnown ? `${this.model.queue.length} queued` : 'queue unknown';
+      $('streamInfo').textContent = this.model.hello ? `stream ${this.model.hello.streamId}, ${this.model.hello.rows}x${this.model.hello.cols}, board v${this.model.hello.boardVersion}` : 'no HELLO yet';
+      const timeline = $('timeline');
+      timeline.innerHTML = '';
+      if (!events.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'No visible events yet. Connect a keyboard or run Demo.';
+        timeline.appendChild(empty);
+      } else {
+        let previousVisible = null;
+        for (const event of events) {
+          timeline.appendChild(this.renderEvent(event, previousVisible));
+          previousVisible = event;
+        }
+      }
+      this.renderDetails();
+      if (this.follow) timeline.scrollTop = timeline.scrollHeight;
+    }
+
+    renderEvent(event, previousVisible) {
+      const visibleDeltaUs = previousVisible && previousVisible.timestampMicros !== null && event.timestampMicros !== null && event.timestampMicros >= previousVisible.timestampMicros
+        ? Number(event.timestampMicros - previousVisible.timestampMicros)
+        : event.deltaUs;
+      const deltaMs = visibleDeltaUs === null ? 0 : visibleDeltaUs / 1000;
+      const desiredGap = Math.round(deltaMs * this.zoom * 0.08);
+      const gap = Math.max(6, Math.min(110, desiredGap));
+      const row = document.createElement('button');
+      row.className = `event ${event.kind.toLowerCase()} compact ${event.severity} ${event.id === this.selectedEventId ? 'selected' : ''}`;
+      row.type = 'button';
+      row.style.marginTop = `${gap}px`;
+      row.addEventListener('click', () => {
+        this.selectedEventId = event.id;
+        this.follow = false;
+        $('followToggle').checked = false;
+        this.render();
+      });
+
+      const lane = document.createElement('span');
+      lane.className = 'lane';
+      lane.textContent = event.kind;
+      const main = document.createElement('span');
+      main.className = 'eventMain';
+      const title = document.createElement('strong');
+      const presentation = trace.eventPresentation(event, this.keyboardLayout);
+      const displayTitle = trace.eventTitle(event, this.keyboardLayout);
+      title.textContent = presentation.primary;
+      main.append(title);
+      if (presentation.combination) {
+        const combination = document.createElement('span');
+        combination.className = 'keyCombination';
+        combination.textContent = ` ${presentation.combination}`;
+        main.append(combination);
+      }
+      const time = document.createElement('small');
+      time.className = 'eventTime';
+      time.textContent = formatMicros(event.timestampMicros);
+      row.title = `${displayTitle}\nseq ${event.sequence ?? '—'}, visible delta ${formatMicros(visibleDeltaUs)}${desiredGap > 110 ? ' (gap compressed)' : ''}\nClick for full details`;
+      row.append(lane, main, time);
+      return row;
+    }
+
+    renderDetails() {
+      const visible = this.filteredEvents();
+      const selected = visible.find(e => e.id === this.selectedEventId) || visible[visible.length - 1];
+      const panel = $('details');
+      if (!selected) {
+        panel.textContent = 'Click an event to inspect queue after it.';
+        return;
+      }
+      const queue = selected.queueKnown
+        ? (selected.queueAfter.length ? selected.queueAfter.map(q => `slot ${q.slot}: #${q.id} row ${q.row + 1} column ${q.col + 1} ${q.pressed ? 'down' : 'up'}`).join('\n') : '(empty)')
+        : 'Unknown until a complete SNAPSHOT_BEGIN/ENTRY*/SNAPSHOT_END checkpoint.';
+      panel.textContent = `${selected.kind} · ${trace.eventTitle(selected, this.keyboardLayout)}
+${selected.detail}
+
+Display layout: ${trace.KEYBOARD_LAYOUTS[this.keyboardLayout]}
+Character preview assumes Caps Lock off; dead-key/IME composition and host receipt are not inferred.
+Sequence: ${selected.sequence ?? '—'}
+Timestamp: ${formatMicros(selected.timestampMicros)}
+Delta: ${formatMicros(selected.deltaUs)}
+
+QUEUE AFTER THIS EVENT:
+${queue}
+
+Raw:
+${JSON.stringify(selected.raw, null, 2)}`;
+    }
+
+    setLiveControls(enabled) {
+      $('demoBtn').disabled = !enabled;
+      $('importInput').disabled = !enabled;
+      const label = $('importInput').closest ? $('importInput').closest('label') : null;
+      if (label) label.classList.toggle('disabled', !enabled);
+    }
+  }
+
+  root.SerialTraceApp = SerialTraceApp;
+  if (typeof module === 'object' && module.exports) module.exports = { SerialTraceApp, demoFrames, formatMicros };
+  if (typeof window !== 'undefined') window.addEventListener('DOMContentLoaded', () => new SerialTraceApp().start());
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+  </script>
+</body>
+</html>

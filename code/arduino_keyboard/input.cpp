@@ -1,6 +1,7 @@
 #include "input.h"
 #include "pos.h"
 #include "MCP23008.hpp"
+#include "trace.h"
 
 #if VERSION == 1
 #define NUM_MCP_CHIPS 8
@@ -110,6 +111,7 @@ void Input::step() {
     pinsForMcp[mcpIndex] = s_mcps[mcpIndex].read_inputs();
 
     if (s_mcps[mcpIndex].isError()) {
+      Trace::i2cReset(mcpIndex);
       mcpError = true;
 #if I2C_RESET_LOG
       mcpErrorIndex = mcpIndex;

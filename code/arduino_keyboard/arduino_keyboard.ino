@@ -6,6 +6,7 @@
 #include "KeyConfig.h"
 #include "event.h"
 #include "overlap.h"
+#include "trace.h"
 
 
 
@@ -34,6 +35,17 @@ private:
 
 /// The queue of input event that are yet to be processed.
 EventQueue s_events;
+uint32_t s_nextEventId = 0;
+
+void removeFront(Trace::Removal reason) {
+  Trace::removed(s_events.peek(), s_events.begin().m_index, reason);
+  s_events.popFront();
+}
+
+void removeQueued(EventQueue::Iterator it, Trace::Removal reason) {
+  Trace::removed(s_events[it], it.m_index, reason);
+  s_events.remove(it);
+}
 
 /// For each switch on the physical keyboard, track if that switch is currently pressed.
 /// Instead of being a bool, we use a counter where "count = 0" mean the switch is not pressed and "count > 0" mean the switch is pressed. We do that so we can do some tricks where we force enable some of the switches momentarely by adding 1 without having to worry about if the switch was already pressed.
@@ -93,6 +105,7 @@ void sendCurrentKeyPress() {
 
 
 void setup() {
+  Trace::begin(s_layerNames, LAYER_COUNT);
 #if ANY_LOG
   Serial.begin(9600);
 #endif
@@ -115,6 +128,7 @@ static const int perf_countTotal = 1000;
 #endif
 
 void loop() {
+  Trace::service(s_events);
 #if PERF_LOG
   unsigned long perf_start = micros();
 #endif
@@ -128,10 +142,17 @@ void loop() {
     for (int column = 0; column < NUM_COLUMNS; ++column) {
 
       if (Input::hasChanged(line, column)) {
+        const uint8_t slot = s_events.end().m_index;
+        if (uint8_t(slot + 1) == s_events.begin().m_index) {
+          // Observe the existing queue overflow; do not change input processing.
+          Trace::queueOverflow(s_events.begin().m_index, slot);
+        }
         Event& event = s_events.emplaceBack();
         event.m_pos = Pos{ line, column };
         event.m_isPressed = Input::isPressed(line, column);
         event.m_time = micros();
+        event.m_id = ++s_nextEventId;
+        Trace::input(event, slot);
 
         ON_DEBUG(anyNewEvent = true);
       }
@@ -154,7 +175,10 @@ void loop() {
     // The way we do debouncing is we wait any event to be older than DEBOUNCE_TIME before processing to check if we can cancel it.
     {
       // If the event is not old enough, we have to wait a bit and pull the switches to check if we need to debounce.
-      if (current - event.m_time < DEBOUNCE_TIME) break;
+      if (current - event.m_time < DEBOUNCE_TIME) {
+        Trace::decision(event, Trace::Action::DEBOUNCE_WAIT);
+        break;
+      }
 
       // We look at future event and see if we have an event in the queue that match this key with an opposite state withing the debouncing time frame.
       bool debounced = false;
@@ -169,8 +193,9 @@ void loop() {
           debugPrint("Cancel key\n");
 
           // We remove the current event and the opposite one.
-          s_events.popFront();
-          s_events.remove(it);
+          Trace::decision(event, Trace::Action::DEBOUNCE_CANCEL, s_events[it].m_id);
+          removeFront(Trace::Removal::DEBOUNCE);
+          removeQueued(it, Trace::Removal::DEBOUNCE);
           debounced = true;
           break;
         }
@@ -216,9 +241,13 @@ void loop() {
       const OverlapAction action = evaluateOverlap(event, scan, current);
 
       // We can't tell yet whether this is a tap or a layer hold, poll for more events.
-      if (action == OverlapAction::WAIT) break;
+      if (action == OverlapAction::WAIT) {
+        Trace::decision(event, Trace::Action::OVERLAP_WAIT, 0, s_layerTracker.mask(), scan.m_interveningPressCount);
+        break;
+      }
 
       if (action == OverlapAction::EMIT_TAP) {
+        Trace::decision(event, Trace::Action::OVERLAP_TAP, s_events[scan.m_releaseIt].m_id, s_layerTracker.mask(), scan.m_interveningPressCount);
         debugPrintln("Overlap removal: emit tap");
 
         // Emit the tap without ever activating the layer, so the key that was pressed in between is
@@ -232,8 +261,8 @@ void loop() {
         sendCurrentKeyPress();
 
         // Drop this key's press and release, leaving every other event untouched.
-        s_events.popFront();
-        s_events.remove(scan.m_releaseIt);
+        removeFront(Trace::Removal::OVERLAP);
+        removeQueued(scan.m_releaseIt, Trace::Removal::OVERLAP);
 
 #if DEBUG_LOG
         debugPrintln("Removed an overlap, event queue:");
@@ -274,6 +303,7 @@ void loop() {
         if (foundRelease) {
           // We found the release event, and there was no press in between. If the two events are within the MAX_HOLD_TIME, we execute the "on release" behavior
           if (s_events[releaseIndex].m_time - event.m_time < MAX_HOLD_TIME) {
+            Trace::decision(event, Trace::Action::TAP, s_events[releaseIndex].m_id, s_layerTracker.mask());
             debugPrintln("Press and release key");
 
             s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]++;
@@ -283,14 +313,17 @@ void loop() {
 
             s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column]--;
             sendCurrentKeyPress();
+          } else {
+            Trace::decision(event, Trace::Action::HOLD, s_events[releaseIndex].m_id, s_layerTracker.mask());
           }
 
           // Remove the two events from the queue and go to the next event.
-          s_events.popFront();
-          s_events.remove(releaseIndex);
+          removeFront(Trace::Removal::TAP);
+          removeQueued(releaseIndex, Trace::Removal::TAP);
           continue;
         } else {
           // We have not found any other key press and we don't have found the release event, we don't know what to do yet, pull for more events.
+          Trace::decision(event, Trace::Action::TAP_WAIT);
           break;
         }
       } else {
@@ -306,6 +339,7 @@ void loop() {
     debugPrintln();
 #endif
 
+    Trace::decision(event, Trace::Action::PROCESS, 0, s_layerTracker.mask());
     // Update the press count for that key.
     uint8_t& pressCount = s_currentPressCount[event.m_pos.m_line][event.m_pos.m_column];
     if (event.m_isPressed) {
@@ -328,6 +362,7 @@ void loop() {
     LayerBit layer = s_layerKeys[event.m_pos.m_line][event.m_pos.m_column];
     if (layer != LAYER_NONE) {
       s_layerTracker.delta(layer, event.m_isPressed ? +1 : -1);
+      Trace::decision(event, Trace::Action::LAYER, 0, s_layerTracker.mask());
 
       // Reset button presses when layer change.
       for (int line = 0; line < NUM_LINES; ++line) {
@@ -358,7 +393,7 @@ void loop() {
     sendCurrentKeyPress();
 
 
-    s_events.popFront();
+    removeFront(Trace::Removal::PROCESSED);
   }
 
 #if PERF_LOG
