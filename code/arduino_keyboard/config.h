@@ -32,7 +32,7 @@
 #define DEBOUNCE_TIME 10000 // micro-seconds
 
 // If enabled, a "tap or layer" key (such as space) that is released slightly too late after the next key was pressed is treated as a tap instead of activating its layer. This fixes typing " a" and getting " à". See overlap.h.
-#define OVERLAP_REMOVAL 1
+#define OVERLAP_REMOVAL 0
 
 // Maximum delay between another key being pressed and the release of a "tap or layer" key for that overlap to be considered accidental rather than a deliberate use of the layer.
 // This is also the worst case latency added when deliberately using such a layer, so it should stay small.
