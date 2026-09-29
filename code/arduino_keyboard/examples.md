@@ -43,3 +43,52 @@ Expected output: `I'm`
 
 Wrong output seen with overlap removal enabled (30 ms threshold): `I tm`. The quick release of
 Space was taken as a late release of a Space tap.
+
+## Typing "'s j" (from "Let's just")
+
+Keys used:
+
+| Position | Base layer | Layer when held | Relevant output |
+|---|---|---|---|
+| 3, 3 | `s` | | |
+| 5, 6 | Space (on tap) | Accent layer | |
+| 3, 8 | `j` | | Keypad `4` on the Accent layer (`NUM_4`) |
+
+Events:
+
+| Time | Event |
+|---|---|
+| 0 ms | press `s` (3, 3) |
+| 88.2 ms | press Space (5, 6) |
+| 90.5 ms | release `s` (3, 3) |
+| 187.5 ms | press `j` (3, 8) |
+| 191.7 ms | release Space (5, 6) |
+| 271.1 ms | release `j` (3, 8) |
+
+Expected output: `s j`
+
+- The release of `s` after the press of Space is only a release, so it does not make Space a layer
+  use.
+- Space is held 99.3 ms before `j` is pressed, and released only 4.2 ms after `j` was pressed. This
+  is a late release of a Space tap, not a use of the Accent layer.
+
+Wrong output seen with overlap removal disabled: `s4`. The press of `j` came before the release of
+Space, so the "on release" code declined the tap, activated the Accent layer, and `j` came out as
+Keypad `4`.
+
+The user deleted the text and typed it again, with the same wrong output. Second attempt, times
+relative to the press of Space:
+
+| Time | Event |
+|---|---|
+| 0 ms | press Space (5, 6) |
+| 100.13 ms | press `j` (3, 8) |
+| 100.20 ms | release Space (5, 6) |
+| 177.75 ms | release `j` (3, 8) |
+
+Here Space is released 0.07 ms after `j` was pressed: the two are almost simultaneous.
+
+Overlap removal (30 ms threshold) would fix this example, but it breaks "I'm" above. The overlap
+here (4.2 ms and 0.07 ms) is much shorter than in "I'm" (15.5 ms), while the Space hold time before
+the other key press is longer (about 100 ms, against 48.9 ms in "I'm"). A threshold on the overlap
+between these values would handle both examples.
