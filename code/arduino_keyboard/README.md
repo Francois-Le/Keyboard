@@ -70,3 +70,11 @@ short/zero writes, CRC framing, timestamp wrap, queue-slot wrap, trace loss and
 reconnect. An optional filename argument writes a binary capture for exercising
 the browser decoder. This does not replace physical HID + CDC enumeration,
 unplug/replug and typing checks on the Pico.
+
+The modifier staging logic (see `MODIFIER_DELAY` in `config.h`) has its own
+host test:
+
+```powershell
+clang++ -std=c++17 code\tests\modifier_staging_test.cpp -o modifier-staging-test.exe
+.\modifier-staging-test.exe
+```

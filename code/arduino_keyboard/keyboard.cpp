@@ -1,6 +1,8 @@
 #include "keyboard.h"
+#include "modifierStaging.h"
 #include "trace.h"
 
+#include <Arduino.h>
 #include "PluggableUSBHID.h"
 #include "platform/Stream.h"
 #include "PlatformMutex.h"
@@ -280,6 +282,11 @@ uint8_t s_modifiers = 0;
 uint8_t s_keys[6] = { 0, 0, 0, 0, 0, 0 };
 int s_nextKey = 0;
 uint8_t s_mediaKeys = 0;
+
+// Last report sent to the host.
+uint8_t s_sentModifiers = 0;
+uint8_t s_sentKeys[6] = { 0, 0, 0, 0, 0, 0 };
+uint8_t s_sentMediaKeys = 0;
 }
 
 void KeyboardOutput::add(Key k) {
@@ -318,7 +325,16 @@ void KeyboardOutput::releaseAll() {
 
 void KeyboardOutput::send() {
   using namespace KeyboardImpl;
+  uint8_t stagedKeys[6];
+  if (stageModifiers(s_sentKeys, s_sentModifiers, s_keys, s_modifiers, stagedKeys)) {
+    s_keyboard.press(stagedKeys, s_modifiers, s_sentMediaKeys);
+    delay(MODIFIER_DELAY);  // milliseconds
+  }
   s_keyboard.press(s_keys, s_modifiers, s_mediaKeys);
+
+  s_sentModifiers = s_modifiers;
+  for (int i = 0; i < 6; ++i) s_sentKeys[i] = s_keys[i];
+  s_sentMediaKeys = s_mediaKeys;
 
   debugPrint("\tSending event: ");
   ON_DEBUG(print());

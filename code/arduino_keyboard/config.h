@@ -44,6 +44,9 @@
 // When the code simulate a single instantaneous key press, this is how long the key is hold for the computer to read.
 #define KEY_PRESS_LENGTH 50 // milli-seconds
 
+// When a key press also changes the modifiers (for example AltGr+7), the new modifiers are sent alone first, then the key after this delay. Without it, some hosts such as Remote Desktop can receive the key before the modifier ("è" instead of "`").
+#define MODIFIER_DELAY 20 // milli-seconds
+
 #if ANY_LOG
 #include <Arduino.h>
 #define debugPrint(x) Serial.print(x)
